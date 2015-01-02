@@ -1,11 +1,21 @@
 Todo file for dropsync:
 
- + fix bug - check for help before checking directory sanity
+1 - do first real run on windows desktop
+   - create sda-windows.conf for windows (sender) machine
+   - create sda-timdesk.conf for timdesk (receiver) machine
+ - support partitioning files (for files larger than size limit)
+   - on sender: when making transfer file:
+     - if file is bigger than transfer_file_size_limit, then:
+       - create multiple partition files in source_dir, and restart (?)
+         - don't re-create existing files with name .partyyofxx
+   - on receiver: after processing transfer files,
+     - if files end in .partyyofxx,
+       - if there's a file with yy==xx, 
+         - find ones with same leading name,
+         - combine them into one file
  - avoid errors based on incorrect -r or -s line:
    - have source_dir be empty on receiver and dest_dir be empty on sender
- - do first real run on windows desktop
  - set up for periodic execution (crontab?, windows something?)
- - support partitioning files (for files larger than size limit)
  - do incremental update of index file
    - have a "quick" index update
      - read index
