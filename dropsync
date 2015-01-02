@@ -54,8 +54,6 @@ class stub_class:
 # but put in some defaults for testing
 default_config = stub_class()
 
-user_specified_config_file = ""
-
 test_dir = "/home/tbird/work/dropsync/test/"
 default_config.source_dir = test_dir+"source_dir"
 default_config.dest_dir = test_dir+"dest_dir"
@@ -83,13 +81,13 @@ def read_config_file(config_path):
 	except:
 		error_out("Cannot open configuration file %s" % config_path, 3)
 
-	valid_attr_list = [
-		"source_dir",	# directory to copy files from
-		"dest_dir",	# directory to copy files to
-		"sync_dir",	# directory to use for transfers
-		"transfer_size_limit",	# limit, in bytes, of transfer files
-		"transfer_count_limit",	# max number of transfer files
-	]
+	valid_attr_list = { 
+		"source_dir":'s',	# directory to copy files from
+		"dest_dir":'s',	# directory to copy files to
+		"sync_dir":'s',	# directory to use for transfers
+		"transfer_size_limit":'d',	# limit, in bytes, of transfer files
+		"transfer_count_limit":'d',	# max number of transfer files
+	}	
 	config = stub_class()
 	in_block = 0
 	block = ""
@@ -103,8 +101,8 @@ def read_config_file(config_path):
 			if line.rstrip().endswith('"""'):
 				# remove quotes and end block
 				line = line.rstrip()
-				block += line[:-3] + "\n"
-				setattr(config, name, block)
+				value = block + line[:-3] + "\n"
+				setattr(config, name, value)
 				in_block = 0
 				continue
 			else:
@@ -124,14 +122,25 @@ def read_config_file(config_path):
 		
 		(name, value) = line.split('=', 1)
 		name = name.strip()
-		if name not in valid_attr_list:
+		if name not in valid_attr_list.keys():
 			print "WARNING: '%s' is not a recognized configuration option" % name
 			print "at line %d in config file: %s" % (line_no, info_file)
 			
 		value = value.strip()
 		if value.find('"""')==-1:
 			# this is a single-line, just record the attribute
-			setattr(config, name, block)
+			try:
+				attr_type = valid_attr_list[name]
+			except:
+				attr_type = 's'
+			# convert items to integers, if type specifies this
+			if attr_type == 'd':
+				try:
+					value = int(value) 
+				except:
+					print "ERROR: expected integer value for option '%s'" % name
+					sys.exit(1)
+			setattr(config, name, value)
 		else:
 			# this is the start of a multi-line block
 			vstart = value.find('"""')
@@ -141,8 +150,8 @@ def read_config_file(config_path):
 			# if triple-quotes end this line, then block begins
 			# and ends on the same line.
 			if block.endswith('"""\n'):
-				block = block[:-3]
-				setattr(config, name, block)
+				value = block[:-3]
+				setattr(config, name, value)
 				in_block = 0
 
 	return config
@@ -183,7 +192,7 @@ def find_config_file(user_specified_config_file):
 
 def get_config(default_config, config_path):
 	if config_path:
-		config = read_config(config_path)
+		config = read_config_file(config_path)
 	else:
 		config = default_config
 		print "WARNING: using test config settings...."
@@ -207,6 +216,8 @@ def get_config(default_config, config_path):
 
 # mode should be "send" or "receive"
 def validate_config(config, mode):
+	dprint("in validate_config(): config=%s" % config.__dict__)
+
 	# do some sanity checks on the config
 	if not os.path.isdir(config.sync_dir):
 		print "ERROR: sync dir '%s' is not a directory" \
@@ -569,6 +580,8 @@ def update_index(index_path, dir_to_be_indexed):
 	generate_index(index_path, dir_to_be_indexed)
 
 def get_transfer_file_list():
+	global config
+
 	# scan sync_dir looking for transfer files
 	file_list = os.listdir(config.sync_dir)
 
@@ -581,6 +594,8 @@ def get_transfer_file_list():
 	return tfiles
 
 def get_next_transfer_filename():
+	global config
+
 	tfiles = get_transfer_file_list()
 
 	# get largest number used so far
@@ -658,6 +673,8 @@ def get_current_transfer_count():
 
 
 def within_transfer_limit(entry):
+	global config
+
 	# check count and size limits for transfer directory
 	if get_current_transfer_count() >= config.transfer_count_limit:
 		vprint("transfer count limit reached, not sending '%s' this time" % \
@@ -738,7 +755,9 @@ def walk_tree_for_removes(entry, other_tree):
 		for child in entry.sub_entries:
 			walk_tree_for_removes(child, other_tree)
 
-def do_send(config):
+def do_send():
+	global config
+
 	# check that dest_index is present
 	if not os.path.isfile(config.dest_index):
 		prog_name = os.path.basename(sys.argv[0])
@@ -845,7 +864,9 @@ def process_transfer_file(filename):
 
 	transfer_count += 1
 
-def do_receive(config):
+def do_receive():
+	global config
+
 	# process any transfer files
 	tfiles = get_transfer_file_list()
 
@@ -860,10 +881,11 @@ def main():
 	global debug
 	global verbose
 	global default_config
+	global config
 
 	mode = "send"
-	generate_index = False
-	user_specified_config = ""
+	do_gen_index = False
+	user_specified_config_file = ""
 
 	if "-r" in sys.argv:
 		sys.argv.remove("-r")
@@ -882,12 +904,14 @@ def main():
 
 	if "-i" in sys.argv:
 		sys.argv.remove("-i")
-		generate_index = True
+		do_gen_index = True
 
 	if "-c" in sys.argv:
-		user_specified_config_file = sys.argv.index("-c")
-		sys.argv.remove(user_specified_config_file)
-		sys.argv.remove("-c")
+		index = sys.argv.index("-c")
+		user_specified_config_file = sys.argv[index+1]
+		vprint("Using config file: %s" % user_specified_config_file)
+		del sys.argv[index+1]
+		del sys.argv[index]
 	
 	if "--version" in sys.argv:
 		prog_name = os.path.basename(sys.argv[0])
@@ -900,28 +924,30 @@ def main():
 		print "  option is being ignored"
 
 	# find, read and validate the configuration
-	config_path = find_config_file(user_specified_config)
+	config_path = find_config_file(user_specified_config_file)
 	config = get_config(default_config, config_path)
 	validate_config(config, mode)
 
-	if generate_index:
+	if do_gen_index:
 		# remove transfer files
 		for filename in get_transfer_file_list():
 			os.remove(filename)
 
 		# generate initial source_index
 		if mode=="send":
+			vprint("Generating source index...")
 			generate_index(config.source_index, config.source_dir)
 		else:
+			vprint("Generating destination index...")
 			generate_index(config.dest_index, config.dest_dir)
 
 		sys.exit(0)
 		
 	if mode == "send":
-		do_send(config)
+		do_send()
 		print "Created %d transfer files." % transfer_count
 	else:
-		do_receive(config)
+		do_receive()
 		print "Processed %d transfer files." % transfer_count
 
 
