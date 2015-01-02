@@ -1,0 +1,44 @@
+Todo file for dropsync:
+
+ - fix bug - check for help before checking directory sanity
+ - do first real run on windows desktop
+ - set up for periodic execution (crontab?, windows something?)
+ - support partitioning files (for files larger than size limit)
+ - do incremental update of index file
+   - have a "quick" index update
+     - read index
+     - scan for date/size mismatch in filesystem
+       - update sha1 on mismatch
+   - scan for missing files
+   - scan for new files
+ - change name to syncdir-amp (for sync_dir amplifier)
+ - show progress of operation
+   - assume 1000 files-per-minute indexing, and give time estimate
+   - measure file copy time, and give time estimate
+ - if sha1 is OK but other attributes are not, only send entry_line
+   - don't send the content, and mark this as an attribute update only
+ - write index as it is read
+   - write directories with placeholder sha1, then fill in sha1 at end
+     - write routine to find entry in index file 
+     - write routine to update entry in index file
+ - read configuration from config
+   - have configuration control sender or receiver mode (to avoid typos
+      that blow up the whole setup)
+   - have source_dir be empty on receiver and dest_dir be empty on sender
+ - allow for specifying omitted dirs
+ - allow for specifying omitted file patterns
+ - use inotify to monitor directories for changes
+   - monitor source_dir (sender)
+   - monitor dest_dir (receiver)
+   - monitor sync_dir (both)
+ - support running directly from Windows (check that paths all work)
+ - test using different OS for sender and receiver (e.g. Windows to Linux)
+ - support sending transfer files by e-mail
+ - use an option to specify 'delete in destination' (don't do it by default)
+ - handle permissions correctly
+ - add version option
+ - send deltas instead of full files (lots of work!, but would save bandwidth)
+ - keep path of indexed directory in index file
+    (and sanity check before overwriting)
+ - use atomic rename (after writing to a temp file) to avoid corrupted files on the destination
+

@@ -8,12 +8,10 @@
 # of the network folder (e.g. 5 gig).  The network folder is used
 # for data transfers, but not long-term storage
 #
-# Copyright 2014 - Tim Bird <tbird20d@yahoo.com>
+# Copyright 2014,2015 - Tim Bird <tbird20d@yahoo.com>
 #
 # see bottom of file for data and algorithm information
 # todo for send:
-#  - read config from file (is this needed?, could get from command line)
-#     only config is source_dir and sync_dir
 # todo for receive
 #
 
@@ -25,44 +23,211 @@ import time
 #import pdb
 #pdb.set_trace()
 
+# version information
+major_version = 0
+minor_version = 5
+revision = 0
+
 debug = 0
 verbose = 0
 transfer_count = 0
 
+
 def usage():
+	prog_name = os.path.basename(sys.argv[0])
 	print """Usage: %s [options]
 
-  -h     show this usage
-  -r     receive files (default mode is to send)
-  -i     initialize dropsync (for either send or receive)
-  -v     be verbose
-""" % os.path.basename(sys.argv[0])
+  -h         show this usage
+  -r         receive files (default mode is to send)
+  -i         initialize %s (for either send or receive)
+  -v         be verbose
+  -c <file>  specify configuration file (default is '/etc/sda.conf')
+               if no config file is found, test settings are used
+  --version  show version information, and exit
+""" % (prog_name, prog_name)
 
-class config:
+# create a class for objects with arbitrary attributes
+class stub_class:
 	pass
 
 # these items should be configured by the user
-config.source_dir = "/home/tbird/work/dropsync/test/source_dir"
-config.dest_dir = "/home/tbird/work/dropsync/test/dest_dir"
-config.sync_dir = "/home/tbird/work/dropsync/test/sync_dir"
-config.transfer_size_limit = 1000000000
-config.transfer_count_limit = 1000
-# FIXTHIS - adjust transfer limits to match any restrictions on
+# but put in some defaults for testing
+default_config = stub_class()
+
+user_specified_config_file = ""
+
+test_dir = "/home/tbird/work/dropsync/test/"
+default_config.source_dir = test_dir+"source_dir"
+default_config.dest_dir = test_dir+"dest_dir"
+default_config.sync_dir = test_dir+"sync_dir"
+# Transfer limits should match any restrictions on
 # your synchronization directory
+default_config.transfer_size_limit = 1000000000
+default_config.transfer_count_limit = 1000
 
+# configuration file syntax:
+# ------------------------
+# empty lines not in a block are ignored
+# lines starting with # are ignored
+# single-line attributes are specified with '=', like so:
+# name=value
+# multi-line attributes use triple-quotes, like so:
+# name="""value line 1
+# value line 2, etc."""
+#
+def read_config_file(config_path):
+	# look in configuration directory
+	info_file = os.path.basename(config_path)
+	try:
+		fl = open(config_path)
+	except:
+		error_out("Cannot open configuration file %s" % config_path, 3)
 
-# NOTE - source index does not have to be in the sync dir
-# but it makes it easier to debug the script.
-# source_index should NOT be inside the source_dir, however
-config.source_index = config.sync_dir+os.path.sep+"source_index"
-config.dest_index = config.sync_dir+os.path.sep+"dest_index"
-config.transfer_prefix = "transfer_file_"
-config.transfer_format = config.sync_dir+os.path.sep+ \
-	config.transfer_prefix+"%05d"
+	valid_attr_list = [
+		"source_dir",	# directory to copy files from
+		"dest_dir",	# directory to copy files to
+		"sync_dir",	# directory to use for transfers
+		"transfer_size_limit",	# limit, in bytes, of transfer files
+		"transfer_count_limit",	# max number of transfer files
+	]
+	config = stub_class()
+	in_block = 0
+	block = ""
+	line_no = 0
+	for line in fl.readlines():
+		line_no += 1
+		if line.startswith("#"):
+			continue
+		if in_block:
+			# try to find end of block
+			if line.rstrip().endswith('"""'):
+				# remove quotes and end block
+				line = line.rstrip()
+				block += line[:-3] + "\n"
+				setattr(config, name, block)
+				in_block = 0
+				continue
+			else:
+				block += line
+				continue
 
-# directories should be absolute paths
-config.source_dir = os.path.abspath(config.source_dir)
-config.dest_dir = os.path.abspath(config.dest_dir)
+		# OK, it's not a comment or middle of a block.
+		# check if it's empty
+		if not line.strip():
+			continue
+
+		# line should have an equals in it
+		# (either single line name=value, or multi-line block start)
+		if line.find("=")==-1:
+			print_error("Syntax error in section info file %s: Expected '=' at line %d:\n%s" % (info_file, line_no, line))
+			continue
+		
+		(name, value) = line.split('=', 1)
+		name = name.strip()
+		if name not in valid_attr_list:
+			print "WARNING: '%s' is not a recognized configuration option" % name
+			print "at line %d in config file: %s" % (line_no, info_file)
+			
+		value = value.strip()
+		if value.find('"""')==-1:
+			# this is a single-line, just record the attribute
+			setattr(config, name, block)
+		else:
+			# this is the start of a multi-line block
+			vstart = value.find('"""')
+			block = value[vstart+3:] + '\n'
+			in_block = 1
+			# sanity check for block terminator on same line
+			# if triple-quotes end this line, then block begins
+			# and ends on the same line.
+			if block.endswith('"""\n'):
+				block = block[:-3]
+				setattr(config, name, block)
+				in_block = 0
+
+	return config
+
+# search for config file, using the following priority:
+#  one specified on command line
+#  one it /etc (system-wide)
+#  one in ~/ (user-specific)
+# if none found, return ""
+def find_config_file(user_specified_config_file):
+	# FIXTHIS - should check for config file readable, in find_config_file
+	if user_specified_config_file:
+		# check that file exists
+		if not os.path.isfile(user_specified_config_file):
+			print "ERROR: config file '%s' not found" % \
+				users_specified_config_file
+			print "Exiting."
+			sys.exit(1)
+		else:
+			return user_specified_config_file
+
+	# check for system sda.conf file
+	if os.path.isfile("/etc/sda.conf"):
+		return "/etc/sda.conf"
+
+	# check for user-specific ~/.sda.conf file
+	home_dir = ""
+	try:
+		home_dir = os.environ["HOME"]
+	except:
+		pass
+
+	if home_dir and os.path.isfile(home_dir+os.path.sep+".sda.conf"):
+		return home_dir+os.path.sep+".sda.conf"
+
+	# nothing found...
+	return ""
+
+def get_config(default_config, config_path):
+	if config_path:
+		config = read_config(config_path)
+	else:
+		config = default_config
+		print "WARNING: using test config settings...."
+		print "   please specify a config file using -c, or place"
+		print "   a config file in '/etc' or your home directory."
+
+	# NOTE - source index does not have to be in the sync dir
+	# but it makes it easier to debug the script.
+	# source_index should NOT be inside the source_dir, however
+	config.source_index = config.sync_dir+os.path.sep+"source_index"
+	config.dest_index = config.sync_dir+os.path.sep+"dest_index"
+	config.transfer_prefix = "transfer_file_"
+	config.transfer_format = config.sync_dir+os.path.sep+ \
+		config.transfer_prefix+"%05d"
+
+	# directories should be absolute paths
+	config.source_dir = os.path.abspath(config.source_dir)
+	config.dest_dir = os.path.abspath(config.dest_dir)
+	
+	return config
+
+# mode should be "send" or "receive"
+def validate_config(config, mode):
+	# do some sanity checks on the config
+	if not os.path.isdir(config.sync_dir):
+		print "ERROR: sync dir '%s' is not a directory" \
+			 % config.sync_dir
+		print "Exiting."
+		sys.exit(1)
+
+	if mode == "send":
+		if not os.path.isdir(config.source_dir):
+			print "ERROR: source dir '%s' is not a directory" \
+				 % config.source_dir
+			print "Exiting."
+			sys.exit(1)
+
+	if mode == "receive":
+		if not os.path.isdir(config.dest_dir):
+			print "ERROR: source dir '%s' is not a directory" \
+				 % config.dest_dir
+			print "Exiting."
+			sys.exit(1)
+
 
 # define some classes for sync entries
 # entries are generated either by scanning or by parsing
@@ -388,30 +553,6 @@ def read_index(filename, base_path):
 	
 	return index_class(sequence, root)
 
-# mode should be "send" or "receive"
-def validate_config(config, mode):
-	# do some sanity checks on the config
-	if not os.path.isdir(config.sync_dir):
-		print "ERROR: sync dir '%s' is not a directory" \
-			 % config.sync_dir
-		print "Exiting."
-		sys.exit(1)
-
-	if mode == "send":
-		if not os.path.isdir(config.source_dir):
-			print "ERROR: source dir '%s' is not a directory" \
-				 % config.source_dir
-			print "Exiting."
-			sys.exit(1)
-
-	if mode == "receive":
-		if not os.path.isdir(config.dest_dir):
-			print "ERROR: source dir '%s' is not a directory" \
-				 % config.dest_dir
-			print "Exiting."
-			sys.exit(1)
-
-
 def update_index(index_path, dir_to_be_indexed):
 	# if file doesn't exist, create it
 	if not os.path.isfile(index_path):
@@ -597,13 +738,15 @@ def walk_tree_for_removes(entry, other_tree):
 		for child in entry.sub_entries:
 			walk_tree_for_removes(child, other_tree)
 
-def do_send():
+def do_send(config):
 	# check that dest_index is present
 	if not os.path.isfile(config.dest_index):
+		prog_name = os.path.basename(sys.argv[0])
 		print "ERROR: could not find dest_index: '%s'" \
 			% config.dest_index
 		print "Cannot continue in send mode."
-		print "Create dest_index file by running 'dropsync -r' on the destionation host"
+		print "Create dest_index file by running '%s -r' on the destionation host" % prog_name
+		print "Exiting."
 		sys.exit(1)
 
 	# for DEBUGGING - receiver can leave transfer files around
@@ -702,7 +845,7 @@ def process_transfer_file(filename):
 
 	transfer_count += 1
 
-def do_receive():
+def do_receive(config):
 	# process any transfer files
 	tfiles = get_transfer_file_list()
 
@@ -716,15 +859,19 @@ def do_receive():
 def main():
 	global debug
 	global verbose
-	global config
+	global default_config
 
 	mode = "send"
+	generate_index = False
+	user_specified_config = ""
 
 	if "-r" in sys.argv:
 		sys.argv.remove("-r")
 		mode = "receive"
 
-	validate_config(config, mode)
+	if "-h" in sys.argv or "--help" in sys.argv:
+		usage()
+		sys.exit(0)
 
 	if "-v" in sys.argv:
 		sys.argv.remove("-v")
@@ -732,13 +879,33 @@ def main():
 	if "--debug" in sys.argv:
 		sys.argv.remove("--debug")
 		debug = 1
-	if "-h" in sys.argv or "--help" in sys.argv:
-		usage()
-		sys.exit(0)
 
 	if "-i" in sys.argv:
-		# remove transfer files 
 		sys.argv.remove("-i")
+		generate_index = True
+
+	if "-c" in sys.argv:
+		user_specified_config_file = sys.argv.index("-c")
+		sys.argv.remove(user_specified_config_file)
+		sys.argv.remove("-c")
+	
+	if "--version" in sys.argv:
+		prog_name = os.path.basename(sys.argv[0])
+		print "%s version %d.%d.%d" % \
+			(prog_name, major_version, minor_version, revision)
+		sys.exit(0)
+
+	for arg in sys.argv[1:]:
+		print "WARNING: unknown option '%s' was specified." % arg
+		print "  option is being ignored"
+
+	# find, read and validate the configuration
+	config_path = find_config_file(user_specified_config)
+	config = get_config(default_config, config_path)
+	validate_config(config, mode)
+
+	if generate_index:
+		# remove transfer files
 		for filename in get_transfer_file_list():
 			os.remove(filename)
 
@@ -751,10 +918,10 @@ def main():
 		sys.exit(0)
 		
 	if mode == "send":
-		do_send()
+		do_send(config)
 		print "Created %d transfer files." % transfer_count
 	else:
-		do_receive()
+		do_receive(config)
 		print "Processed %d transfer files." % transfer_count
 
 
