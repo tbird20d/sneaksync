@@ -1,0 +1,87 @@
+=== Information about the data and algorithms for this program ===
+ 
+the source machine has:
+  source_dir - the location of files to be backed up
+  source_index - the index of source_dir
+  sync_dir - the directory for transferring synced files
+    dest_index - the index of dest_dir
+    transfer_file_N - a file being transferred to the destination
+
+the destination machine has:
+  sync_dir - the directory for transferring synced files
+    dest_index - the index of dest_dir
+    transfer_file_N - a file being transferred to the destination
+  dest_dir - the location of backup files on the destination
+
+== data ==
+
+=== index file ===
+The index file has the format:
+sequence sha1
+entries
+
+Sequence is a monotonically increasing number, occupying a fixed space
+of 50 decimal digits (with leading 0s), indicating the version of the file.
+sha1 is the digest of all entry lines in the file
+
+Each index entry is one line with the format 
+  type, path, size, date, perms, sha1
+The index file is sorted for faster searches.
+Directory contents are listed alphabetically, following the directory
+entry for that group.
+
+The type is either "f" or "d" (for file or directory, respectively)
+
+To avoid commas in the path portion of the directy entry, the path
+is escaped as follows:
+ % are converted to %25
+ , are convereted %2C
+
+date is of format: 2014-12-31_12:59:59
+perms are unix perms in string format (e.g. 'rwxrwxrwx'
+
+For a file, the sha1 is the digest of the content of the file.
+For a directory, the sha1 is the digest of the entries for all files and
+sub-directories of a directory (with the entries sorted in alphabetical order)
+
+=== transfer file ===
+A transfer file has the following data:
+
+index entry
+content
+
+If the transfer file indicates a removal, the sha1 has the text "<deleted>"
+and the content is empty
+
+== sender algorithm ==
+each time run, do:
+update source_index
+  if source_index is not present, generate it
+  else scan source_dir, and update source_index
+transfer files that need updating on destination
+  compare source_index with dest_index
+    for each entry in source_index:
+      if entry is missing or different in dest_index
+        create transfer file in d1
+        loop until size would be exceeded or no more files to transfer
+    for each entry in dest_index:
+      if entry is missing in source_index
+        create deletion transfer file in d1
+watch for more updates
+  watch dest_index for change 
+loop until there are no more files to transfer
+
+== receiver algorithm ==
+each time run, do:
+update dest_index
+  if dest_index is not present, generate it
+  else scan dest_dir, and update dest_index
+receive transfer files
+  if there's a transfer file,
+    [check if a file in dest_dir matches or not] (optional optimization)
+    copy transfer file to dest_dir
+    update dest_index with entry for newly copied file
+      get sha1, rewrite dest_index
+    loop until no more files to transfer
+
+

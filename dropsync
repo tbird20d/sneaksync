@@ -1,0 +1,818 @@
+#!/usr/bin/python
+#
+# dropsync - program to backup data over a synchronized network folder
+#
+# This program allows you to keep a large data directory synchronized
+# with one or more backups, using a synchronized network folder
+# (like dropbox).  It does this while not exceeding the file limits
+# of the network folder (e.g. 5 gig).  The network folder is used
+# for data transfers, but not long-term storage
+#
+# Copyright 2014 - Tim Bird <tbird20d@yahoo.com>
+#
+# see bottom of file for data and algorithm information
+# todo for send:
+#  - read config from file (is this needed?, could get from command line)
+#     only config is source_dir and sync_dir
+# todo for receive
+#
+
+import sys, os
+import sha
+import stat
+import datetime
+import time
+#import pdb
+#pdb.set_trace()
+
+debug = 0
+verbose = 0
+transfer_count = 0
+
+def usage():
+	print """Usage: %s [options]
+
+  -h     show this usage
+  -r     receive files (default mode is to send)
+  -i     initialize dropsync (for either send or receive)
+  -v     be verbose
+""" % os.path.basename(sys.argv[0])
+
+class config:
+	pass
+
+# these items should be configured by the user
+config.source_dir = "/home/tbird/work/dropsync/test/source_dir"
+config.dest_dir = "/home/tbird/work/dropsync/test/dest_dir"
+config.sync_dir = "/home/tbird/work/dropsync/test/sync_dir"
+config.transfer_size_limit = 1000000000
+config.transfer_count_limit = 1000
+# FIXTHIS - adjust transfer limits to match any restrictions on
+# your synchronization directory
+
+
+# NOTE - source index does not have to be in the sync dir
+# but it makes it easier to debug the script.
+# source_index should NOT be inside the source_dir, however
+config.source_index = config.sync_dir+os.path.sep+"source_index"
+config.dest_index = config.sync_dir+os.path.sep+"dest_index"
+config.transfer_prefix = "transfer_file_"
+config.transfer_format = config.sync_dir+os.path.sep+ \
+	config.transfer_prefix+"%05d"
+
+# directories should be absolute paths
+config.source_dir = os.path.abspath(config.source_dir)
+config.dest_dir = os.path.abspath(config.dest_dir)
+
+# define some classes for sync entries
+# entries are generated either by scanning or by parsing
+# when parsing, fields are set from strings in index entries
+# when scanning, fields are set from file system and sha1 operations
+class file_entry:
+	def __init__(self, path, size, date, perms, base_path):
+		# path is stored in filesystem (unescaped) format
+		# path is relative to the base_path (not an absolute path)
+		self.path = path
+		self.size = size
+		self.date = date
+		self.perms = perms
+		self.sha1 = "<none>"
+		self.base_path = base_path
+	
+	def full_path(self):
+		return self.base_path + os.path.sep + self.path
+
+	def escape_path(self, path):
+		# escape sequences are:
+		# % -> %25
+		# , -> %2C
+		new1 = path.replace("%", "%25")
+		new2 = new1.replace(",", "%2C")
+		return new2
+
+	def unescape_path(self, path):
+		# back these out in reverse order of application
+		new1 = path.replace("%2C", ",")
+		new2 = new1.replace("%25", "%")
+		return new2
+
+	def mtime(self):
+		# returns time in seconds since epoch
+		(date_part,time_part) = self.date.split("_")
+		year_str, month_str, day_str = date_part.split("-")
+		hour_str, minute_str, second_str = time_part.split(":")
+		d = datetime.datetime(int(year_str), int(month_str),
+			int(day_str), int(hour_str), int(minute_str),
+			int(second_str))
+		return time.mktime(d.timetuple())
+
+	def calculate_sha1(self):
+		# for a file, the sha1 is the sha1 of the file content
+		f = open(self.full_path(), mode = 'rb')
+		d = sha.new()
+		buf = 0
+		while buf != b'':
+			buf = f.read(32768)
+			d.update(buf)
+		f.close()
+		self.sha1 = d.hexdigest()
+		return self.sha1
+
+	def base_line(self):
+		epath = self.escape_path(self.path)
+		if self.sha1 == "<none>":
+			print "ERROR: sha1 not calculated yet!"
+		return "%s, %d, %s, %s, %s" % (epath, self.size,
+			self.date, self.perms, self.sha1)
+
+	def to_line(self):
+		return "f, "+self.base_line()
+
+	def is_dir(self):
+		return False
+
+	def lookup_by_path(self, entry):
+		if self.path == entry.path:
+			return self
+		else:
+			return None
+
+	def attr_match(self, entry):
+		dprint("self.sha1=%s" % self.sha1)
+		dprint("entry.sha1=%s" % entry.sha1)
+		dprint("self.size=%d" % self.size)
+		dprint("entry.size=%d" % entry.size)
+		dprint("self.date=%s" % self.date)
+		dprint("entry.date=%s" % entry.date)
+		dprint("self.perms=%s" % self.perms)
+		dprint("entry.perms=%s" % entry.perms)
+		if self.sha1 == entry.sha1 and \
+			self.size == entry.size and \
+			self.date == entry.date and \
+			self.perms == entry.perms:
+			dprint("matched!")
+			return self
+		else:
+			dprint("did not match!")
+			return None
+	def __repr__(self):
+		return "entry %s" % os.path.basename(self.path)
+
+
+class dir_entry(file_entry):
+	def __init__(self, path, size, date, perms, base_path):
+		# path is stored in filesystem (unescaped) format
+		# path is relative to the base_path (not an absolute path)
+		file_entry.__init__(self, path, size, date, perms, base_path)
+		self.sub_entries = []
+
+	def add_sub_entry(self, entry):
+		self.sub_entries.append(entry)
+
+	def sort_sub_entries(self):
+		entry_list = sorted(self.sub_entries,
+			key = lambda entry: entry.path)
+		self.sub_entries = entry_list
+
+	def calculate_sha1(self):
+		# sha1 for a directory is the digest of sub-entry strings
+		# sorted by path
+		self.sort_sub_entries()
+		temp = ""
+		for entry in self.sub_entries:
+			temp += entry.to_line()+"\n"
+
+		# now generate the digest from the buffer
+		self.sha1 = sha.new(temp).hexdigest()
+		return self.sha1
+
+	def to_line(self):
+		return "d, "+self.base_line()
+
+	def is_dir(self):
+		return True
+
+	def lookup_by_path(self, entry):
+		dprint("in (dir_entry).lookup_by_path()")
+		dprint("self=%s" % self)
+		dprint("self.sub_entries=%s" % self.sub_entries)
+		dprint("entry=%s" % entry)
+		if self.path == entry.path:
+			return self
+		else:
+			found = None
+			for child in self.sub_entries:
+				if entry.path.startswith(child.path):
+					found = child.lookup_by_path(entry)
+					if found:
+						break
+			return found
+
+
+class index_class:
+	def __init__(self, sequence, root):
+		self.sequence = sequence
+		self.root = root
+
+def parse_index_entry(line, base_path):
+	parts = line.split(", ")
+	if len(parts) != 6:
+		print "!!! ERROR - problem extracting index data"
+		print "line was: '%s'" % line
+	entry_type = parts[0]
+	path = parts[1]
+	size = int(parts[2])
+	date = parts[3]
+	perms = parts[4]
+	sha1 = parts[5]
+	
+	if entry_type == "f":
+		e = file_entry(path, size, date, perms, base_path)
+	else:
+		e = dir_entry(path, size, date, perms, base_path)
+	e.path = e.unescape_path(path)
+	e.sha1 = sha1
+	return e
+
+def dprint(msg):
+	if debug:
+		print msg
+
+def vprint(msg):
+	if verbose:
+		print msg
+
+def perm_to_ascii(mode):
+	return "perm-not-done"
+
+def relative_path(full_path, base_path):
+	# trim path to be relative to base_path
+	if not full_path.startswith(base_path):
+		print "WARNING: path '%s' is not inside base path of '%s'" \
+			% (full_path, base_path)
+		print "cannot create relative path"
+		return full_path
+	
+	rel_path = full_path[len(base_path)+1:]
+	return rel_path
+
+def create_file_entry(full_path, base_path):
+	st = os.stat(full_path)
+
+	rel_path = relative_path(full_path, base_path)
+	
+	size = st.st_size
+	# FIXTHIS - should this be ctime or mtime?
+	date = datetime.datetime.fromtimestamp(st.st_mtime)
+	date_str = date.strftime("%Y-%m-%d_%H:%M:%S")
+	perm_str = perm_to_ascii(stat.S_IMODE(st.st_mode))
+
+	entry = file_entry(rel_path, size, date_str, perm_str, base_path)
+	entry.calculate_sha1()
+	return entry
+
+def create_dir_entry(full_path, base_path):
+	st = os.stat(full_path)
+
+	rel_path = relative_path(full_path, base_path)
+
+	size = st.st_size
+	date = datetime.datetime.fromtimestamp(st.st_mtime)
+	date_str = date.strftime("%Y-%m-%d_%H:%M:%S")
+	perm_str = perm_to_ascii(stat.S_IMODE(st.st_mode))
+
+	entry = dir_entry(rel_path, size, date_str, perm_str, base_path)
+	return entry
+
+def process_path(cur_path, base_path):
+	dprint("Processing path '%s'" % cur_path)
+	full_path = os.path.abspath(cur_path)
+
+	# if it's a regular file, just create the node
+	if os.path.isfile(full_path):
+		entry = create_file_entry(full_path, base_path)
+		return entry
+	
+	# if a directory, create the node and populate children before
+	# calculating the sha1
+	if os.path.isdir(full_path):
+		entry = create_dir_entry(full_path, base_path)
+
+		item_list = os.listdir(full_path)
+
+		for item in item_list:
+			item_path = os.path.join(full_path, item)
+			
+			child = process_path(item_path, base_path)
+			if child:
+				entry.add_sub_entry(child)
+
+		entry.calculate_sha1()
+		return entry
+			
+	# skip things that are not files or directories
+	# (symlinks, device files, etc.)
+	return None
+
+def print_tree(entry):
+	print entry.to_line()
+	if entry.is_dir():
+		# NOTE: sub_entries should already be sorted
+		for child in entry.sub_entries:
+			print_tree(child)
+
+def write_tree(f, entry):
+	f.write(entry.to_line()+"\n")
+	if entry.is_dir():
+		# NOTE: sub_entries should already be sorted
+		for child in entry.sub_entries:
+			write_tree(f,child)
+
+def write_index(filename, index):
+	f = open(filename, "w")
+
+	seq_line = "%040d\n" % index.sequence
+	f.write(seq_line)
+
+	# now write the tree
+	write_tree(f, index.root)
+	f.close()
+		
+def generate_index(filename, dir_to_be_indexed):
+	# scan directory, generating index lines
+	entry = process_path(dir_to_be_indexed, dir_to_be_indexed)
+
+	# use starting sequence of 0000...01
+	index = index_class(1, entry)
+
+	write_index(filename, index)
+
+
+# returns an index object for the root of the tree
+def read_index(filename, base_path):
+	f = open(filename, "r")
+
+	seq_line = f.readline()
+	sequence = int(seq_line)
+
+	root = None
+	dir_stack = []
+	for line in f.xreadlines():
+		# parse line with trailing whitespace ('\n') removed
+		entry = parse_index_entry(line.rstrip(), base_path)
+		dprint("processing entry %s" % entry.path)
+		dprint("dir_stack=%s" % dir_stack)
+
+		if not root:
+			# this only happens once
+			dir_stack.append(entry)
+			root = entry
+			continue
+
+		# manage dir_stack
+		# pop items that are not my parent directories
+		while not entry.path.startswith(dir_stack[-1].path):
+			dir_stack.pop()
+
+		# put me on my parent dir's child list
+		if entry.path.startswith(dir_stack[-1].path):
+			dir_stack[-1].add_sub_entry(entry)
+		else:
+			print "What happened?, parent dir should be on dir_stack"
+			print "entry.path=", entry.path	
+			print "dir_stack[-1].path=", dir_stack[-1].path
+
+		# if I'm a directory, put me on dir_stack
+		if entry.is_dir():
+			dir_stack.append(entry)
+	
+	return index_class(sequence, root)
+
+# mode should be "send" or "receive"
+def validate_config(config, mode):
+	# do some sanity checks on the config
+	if not os.path.isdir(config.sync_dir):
+		print "ERROR: sync dir '%s' is not a directory" \
+			 % config.sync_dir
+		print "Exiting."
+		sys.exit(1)
+
+	if mode == "send":
+		if not os.path.isdir(config.source_dir):
+			print "ERROR: source dir '%s' is not a directory" \
+				 % config.source_dir
+			print "Exiting."
+			sys.exit(1)
+
+	if mode == "receive":
+		if not os.path.isdir(config.dest_dir):
+			print "ERROR: source dir '%s' is not a directory" \
+				 % config.dest_dir
+			print "Exiting."
+			sys.exit(1)
+
+
+def update_index(index_path, dir_to_be_indexed):
+	# if file doesn't exist, create it
+	if not os.path.isfile(index_path):
+		generate_index(index_path, dir_to_be_indexed)
+		return
+
+	# FIXTHIS - should do real (sparse) update
+	# for now, just run generate_index (optimize)
+	# real sparse update should do the following:
+	#   read the existing index
+	#   scan the dir_to_be_indexed for dirs and files different from index
+	#     could use timestamps and file-sizes to speed up scan
+	#   re-write the index with new entries
+	generate_index(index_path, dir_to_be_indexed)
+
+def get_transfer_file_list():
+	# scan sync_dir looking for transfer files
+	file_list = os.listdir(config.sync_dir)
+
+	tfiles = []
+	for filename in file_list:
+		if filename.startswith(config.transfer_prefix):
+			tfiles.append(config.sync_dir+os.path.sep+filename)
+
+	dprint("transfer files=%s" % tfiles)
+	return tfiles
+
+def get_next_transfer_filename():
+	tfiles = get_transfer_file_list()
+
+	# get largest number used so far
+	max_num = 0
+	for filename in tfiles:
+		try:
+			end_num = int(filename[-5:])
+			if end_num > max_num:
+				max_num = end_num
+		except:
+			pass
+
+	max_num += 1
+	filename = config.transfer_format % max_num
+	dprint("next transfer filename='%s'" % filename)
+	return filename
+		
+
+# only called for files, not directories
+# transfer_type must be one of: "remove" or "update"
+def make_transfer_file(entry, transfer_type):
+	global transfer_count
+
+	filename = get_next_transfer_filename()
+	vprint("Creating transfer file '%s' for file '%s'" % \
+		(filename, entry.path))
+
+	outfile = open(filename, "w")
+
+	if transfer_type == "update":
+		outfile.write(entry.to_line()+"\n")
+	else:
+		# this is a "remove" transfer
+		saved_sha1 = entry.sha1
+		entry.sha1 = "<deleted>"
+		outfile.write(entry.to_line()+"\n")
+		entry.sha1 = saved_sha1
+		outfile.close()
+		transfer_count += 1
+		return
+
+	if not entry.is_dir():
+		# put file content after entry line
+		infile = open(entry.full_path(), "rb")
+		buf = 0
+		while buf != b'':
+			buf = infile.read(32768)
+			outfile.write(buf)
+		infile.close()
+
+	outfile.close()
+	transfer_count += 1
+
+def get_current_transfer_size():
+	# scan list of transfer files, and sum their sizes
+	tfiles = get_transfer_file_list()
+
+	total_size = 0
+	for filename in tfiles:
+		total_size += os.path.getsize(filename)
+
+	dprint("current total transfer size=%d" % total_size)
+	return total_size
+
+def get_current_transfer_count():
+	# count the list of transfer files
+	tfiles = get_transfer_file_list()
+
+	count = 0
+	for filename in tfiles:
+		count += 1
+
+	dprint("current transfer count=%d" % count)
+	return count
+
+
+def within_transfer_limit(entry):
+	# check count and size limits for transfer directory
+	if get_current_transfer_count() >= config.transfer_count_limit:
+		vprint("transfer count limit reached, not sending '%s' this time" % \
+			entry.path)
+		return False
+	elif get_current_transfer_size() >= config.transfer_size_limit:
+		vprint("transfer size limit reached, not sending '%s' this time" % \
+			entry.path)
+		return False
+	else:
+		return True
+
+######################## old action system ############################
+def action_send(entry):
+	dprint("in action_send for '%s'" % entry)
+
+	if not within_transfer_limit(entry):
+		return
+
+	make_transfer_file(entry, "update")
+
+def action_remove(entry):
+	dprint("in action_remove for '%s'" % entry)
+	if not within_transfer_limit(entry):
+		return
+
+	if not entry.is_dir():
+		make_transfer_file(entry, "remove")
+		return
+	else:
+		for child in entry.sub_entries:
+			make_transfer_file(child, "remove")
+		make_transfer_file(entry, "remove")
+
+def walk_tree(entry, other_tree, action):
+	# look up entry in other tree, if different, do callback
+	dprint("walking tree at entry %s" % entry)
+	other = other_tree.lookup_by_path(entry)
+	dprint("other= %s" % other)
+	if other == None or not other.attr_match(entry):
+		action(entry)
+
+	if entry.is_dir():
+		dprint("%s is a dir, walking children" % entry.path)
+		for child in entry.sub_entries:
+			walk_tree(child, other_tree, action)
+
+######################## new action system ############################
+def walk_tree_for_updates(entry, other_tree):
+	# look up entry in other tree, if different, do callback
+	dprint("walking tree at entry %s" % entry)
+	other = other_tree.lookup_by_path(entry)
+	dprint("other= %s" % other)
+
+	# if item is not found, or is different in other tree, update it
+	if other == None or not other.attr_match(entry):
+		if within_transfer_limit(entry):
+			make_transfer_file(entry, "update")
+
+	if entry.is_dir():
+		dprint("%s is a dir, walking children" % entry.path)
+		for child in entry.sub_entries:
+			walk_tree_for_updates(child, other_tree)
+
+def walk_tree_for_removes(entry, other_tree):
+	# look up entry in other tree, if different, do callback
+	dprint("walking tree at entry %s" % entry)
+	other = other_tree.lookup_by_path(entry)
+	dprint("other= %s" % other)
+
+	# if item is not present in other tree, remove it
+	if other == None:
+		if within_transfer_limit(entry):
+			make_transfer_file(entry, "remove")
+
+	if entry.is_dir():
+		dprint("%s is a dir, walking children" % entry.path)
+		for child in entry.sub_entries:
+			walk_tree_for_removes(child, other_tree)
+
+def do_send():
+	# check that dest_index is present
+	if not os.path.isfile(config.dest_index):
+		print "ERROR: could not find dest_index: '%s'" \
+			% config.dest_index
+		print "Cannot continue in send mode."
+		print "Create dest_index file by running 'dropsync -r' on the destionation host"
+		sys.exit(1)
+
+	# for DEBUGGING - receiver can leave transfer files around
+	# get rid of them before starting
+#	tfiles = get_transfer_file_list()
+#	for filename in tfiles:
+#		os.remove(filename)
+
+	vprint("Updating source index")
+	update_index(config.source_index, config.source_dir)
+
+	# read the source and destination indexes
+	vprint("Reading source index")
+	si = read_index(config.source_index, config.source_dir)
+
+	vprint("Reading destination index")
+	di = read_index(config.dest_index, config.dest_dir)
+	
+	# scan the indexes, and print a message for each difference
+	# do a traversal, and look up the item in the other tree
+	vprint("Performing update actions")
+	walk_tree_for_updates(si.root, di.root)
+	
+	vprint("Performing removal actions")
+	walk_tree_for_removes(di.root, si.root)
+
+def process_transfer_file(filename):
+	global transfer_count
+
+	# read transfer file and act on it
+	f = open(filename, "rb")
+	line = f.readline()
+	entry = parse_index_entry(line.rstrip(), config.dest_dir)
+
+	vprint("Processing transfer file %s, for path '%s'" \
+		% (filename[-5:], entry.path))
+
+	# NOTE - transfer file is still open at this point
+
+	if entry.sha1 == "<deleted>":
+		f.close()
+		if entry.is_dir():
+			vprint("Deleting directory")
+			try:
+				os.rmdir(entry.full_path())
+			except:
+				pass
+			dprint("os.rmdir('%s')" % entry.path)
+		else:
+			vprint("Deleting file")
+			try:
+				os.remove(entry.full_path())
+			except:
+				pass
+			dprint("os.remove('%s')" % entry.path)
+		dprint("Removing transfer file")
+		os.remove(filename)
+		transfer_count += 1
+		return
+
+	# not a remove, make something
+	if entry.is_dir():
+		# make directory, if not already present
+		vprint("Creating directory")
+		f.close()
+		try:
+			os.makedirs(entry.full_path())
+		except:
+			pass
+	else:
+		vprint("Copying file contents")
+		# create leading dirs in destination dir if needed
+		try:
+			os.makedirs(os.path.dirname(entry.full_path()))
+		except:
+			pass
+
+		# copy the file contents, from remainder of transfer file
+		outfile = open(entry.full_path(), "wb")
+		buf = 0
+		while buf != b'':
+			buf = f.read(32768)
+			outfile.write(buf)
+
+		outfile.close()
+		f.close()
+
+	# touch the file date and time
+	mtime = entry.mtime()
+	os.utime(entry.full_path(), (mtime,mtime))
+	
+	# FIXTHIS - adjust permissions
+
+	dprint("Removing transfer file")
+	os.remove(filename)
+
+	transfer_count += 1
+
+def do_receive():
+	# process any transfer files
+	tfiles = get_transfer_file_list()
+
+	for filename in tfiles:
+		process_transfer_file(filename)
+
+	# update destination index
+	vprint("Updating dest_index file")
+	update_index(config.dest_index, config.dest_dir)
+
+def main():
+	global debug
+	global verbose
+	global config
+
+	mode = "send"
+
+	if "-r" in sys.argv:
+		sys.argv.remove("-r")
+		mode = "receive"
+
+	validate_config(config, mode)
+
+	if "-v" in sys.argv:
+		sys.argv.remove("-v")
+		verbose = 1
+	if "--debug" in sys.argv:
+		sys.argv.remove("--debug")
+		debug = 1
+	if "-h" in sys.argv or "--help" in sys.argv:
+		usage()
+		sys.exit(0)
+
+	if "-i" in sys.argv:
+		# remove transfer files 
+		sys.argv.remove("-i")
+		for filename in get_transfer_file_list():
+			os.remove(filename)
+
+		# generate initial source_index
+		if mode=="send":
+			generate_index(config.source_index, config.source_dir)
+		else:
+			generate_index(config.dest_index, config.dest_dir)
+
+		sys.exit(0)
+		
+	if mode == "send":
+		do_send()
+		print "Created %d transfer files." % transfer_count
+	else:
+		do_receive()
+		print "Processed %d transfer files." % transfer_count
+
+
+	vprint("Done.")
+	
+
+if __name__ == "__main__":
+	main()
+
+# === Information about the data and algorithms for this program ===
+# 
+# the source machine has:
+#   source_dir - the location of files to be backed up
+#   source_index - the index of source_dir
+#   sync_dir - the directory for transferring synced files
+#     dest_index - the index of dest_dir
+#     transfer_file_N - a file being transferred to the destination
+#
+# the destination machine has:
+#   sync_dir - the directory for transferring synced files
+#     dest_index - the index of dest_dir
+#     transfer_file_N - a file being transferred to the destination
+#   dest_dir - the location of backup files on the destination
+#
+# == sender algorithm ==
+# each time run, do:
+# update source_index
+#   if source_index is not present, generate it
+#   else scan source_dir, and update source_index
+# transfer files to update
+#   compare source_index with dest_index
+#   if file is missing or different in dest_index
+#     create transfer file in d1
+#     loop until size would be exceeded or no more files to transfer
+# check that file transfered
+#   watch dest_index for change 
+#   scan dest_index
+#     if entry for transfer file matches source, remove transfer file
+# loop until there are no more files to transfer
+#
+# == receiver algorithm ==
+# each time run, do:
+# update dest_index
+#   if dest_index is not present, generate it
+#   else scan dest_dir, and update dest_index
+# receive transfer files
+#   if there's a transfer file,
+#     [check if file in dest_dir matches or not] (optional optimization)
+#     copy transfer file to dest_dir
+#     update dest_index with entry for newly copied file
+#       get sha1, rewrite dest_index
+#     loop no more files to transfer
+#
+# each index entry is one line with the format
+# path, size, date, perms, sha1
+# if path has commas, they are escaped as follows:
+#  \\ = \
+#  \, = ,
+# date is of format: 2014-12-31_12:59:59
+# perms are unix perms in string format
+
