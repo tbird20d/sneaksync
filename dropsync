@@ -167,7 +167,7 @@ def find_config_file(user_specified_config_file):
 		# check that file exists
 		if not os.path.isfile(user_specified_config_file):
 			print "ERROR: config file '%s' not found" % \
-				users_specified_config_file
+				user_specified_config_file
 			print "Exiting."
 			sys.exit(1)
 		else:
