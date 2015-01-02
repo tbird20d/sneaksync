@@ -1,6 +1,8 @@
 Todo file for dropsync:
 
- - fix bug - check for help before checking directory sanity
+ + fix bug - check for help before checking directory sanity
+ - avoid errors based on incorrect -r or -s line:
+   - have source_dir be empty on receiver and dest_dir be empty on sender
  - do first real run on windows desktop
  - set up for periodic execution (crontab?, windows something?)
  - support partitioning files (for files larger than size limit)
@@ -21,10 +23,6 @@ Todo file for dropsync:
    - write directories with placeholder sha1, then fill in sha1 at end
      - write routine to find entry in index file 
      - write routine to update entry in index file
- - read configuration from config
-   - have configuration control sender or receiver mode (to avoid typos
-      that blow up the whole setup)
-   - have source_dir be empty on receiver and dest_dir be empty on sender
  - allow for specifying omitted dirs
  - allow for specifying omitted file patterns
  - use inotify to monitor directories for changes
