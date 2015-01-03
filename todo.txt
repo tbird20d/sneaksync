@@ -1,8 +1,28 @@
 Todo file for dropsync:
 
 1 - do first real run on windows desktop
-   - create sda-windows.conf for windows (sender) machine
-   - create sda-timdesk.conf for timdesk (receiver) machine
+   + create sda-windows.conf for windows (sender) machine
+     - created 1000 transfer files, including one for:
+   + create sda-timdesk.conf for timdesk (receiver) machine
+
+dest_index:f, 2013/2013-02/legoland/IMG_20130219_153241.jpg, 1491402, 2013-02-19_15:32:42, perm-not-done, beda3aa609fee8c5dbfc592a347f6affa6ac8cb3
+dest_index:f, phone upload/Nadine's phone/IMG_20130219_153241.jpg, 1491402, 2013-02-19_15:32:42, perm-not-done, beda3aa609fee8c5dbfc592a347f6affa6ac8cb3
+source_index:f, 2013/2013-02/Legoland/IMG_20130219_153241.jpg, 1491402, 2013-02-19_15:32:42, perm-not-done, beda3aa609fee8c5dbfc592a347f6affa6ac8cb3
+Binary file transfer_file_01000 matches
+10102229@ussvlx8980:~/Dropbox/dropsync-transfer$ head -n 1 transfer_file_01000
+f, 2013/2013-02/Legoland/IMG_20130219_153241.jpg, 1491402, 2013-02-19_15:32:42, perm-not-done, beda3aa609fee8c5dbfc592a347f6affa6ac8cb3
+  - fix bugs found:
+    - why was this transfer file created?  file is in destination with matching
+    date, time, and sha1 - is case of directory name (Legoland vs. legoland)
+    - on receiver side, transfer files were immediately removed (within
+     seconds after starting dropsync -r (unfortunately, I did not do verbose,
+     so I didn't see any processing messages)
+    - I really need faster processing for creating/updating the index
+    - add logging so I can track what is going on
+    - need to automate one side or the other
+      - implement sequence number handling - only act if sequence of partner
+       index is greater than sequence in your index
+    
  - support partitioning files (for files larger than size limit)
    - on sender: when making transfer file:
      - if file is bigger than transfer_file_size_limit, then:

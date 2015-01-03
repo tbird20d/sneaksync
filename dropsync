@@ -14,6 +14,8 @@
 # todo for send:
 # todo for receive
 #
+# CHANGELOG
+# 0.5.2 - added transfer_skip_count to show non-transferred files
 
 import sys, os
 import sha
@@ -26,11 +28,12 @@ import time
 # version information
 major_version = 0
 minor_version = 5
-revision = 0
+revision = 2
 
 debug = 0
 verbose = 0
 transfer_count = 0
+transfer_skip_count = 0
 
 
 def usage():
@@ -674,15 +677,18 @@ def get_current_transfer_count():
 
 def within_transfer_limit(entry):
 	global config
+	global transfer_skip_count
 
 	# check count and size limits for transfer directory
 	if get_current_transfer_count() >= config.transfer_count_limit:
 		vprint("transfer count limit reached, not sending '%s' this time" % \
 			entry.path)
+		transfer_skip_count += 1
 		return False
 	elif get_current_transfer_size() >= config.transfer_size_limit:
 		vprint("transfer size limit reached, not sending '%s' this time" % \
 			entry.path)
+		transfer_skip_count += 1
 		return False
 	else:
 		return True
@@ -946,6 +952,8 @@ def main():
 	if mode == "send":
 		do_send()
 		print "Created %d transfer files." % transfer_count
+		if transfer_skip_count:
+			print "Skipped %d items that still need to be transferred." % transfer_skip_count
 	else:
 		do_receive()
 		print "Processed %d transfer files." % transfer_count
