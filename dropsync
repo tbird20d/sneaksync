@@ -17,6 +17,7 @@
 #  - partition large files
 #
 # CHANGELOG
+# 0.6.1 - add ending time to log
 # 0.6.0 - add support for logging
 # 0.5.2 - added transfer_skip_count to show non-transferred files
 
@@ -31,7 +32,7 @@ import time
 # version information
 major_version = 0
 minor_version = 6 
-revision = 0 
+revision = 1
 
 debug = 0
 verbose = 0
@@ -452,8 +453,11 @@ def close_log():
 
 	dprint("Closing log.")
 	if logf:
+		date_str = time.ctime()
+		write_log("Ending execution at: %s" % date_str)
+		write_log("=========================================================")
 		logf.close()
-	logf = None
+		logf = None
 
 # always print (and log)
 def aprint(msg):
