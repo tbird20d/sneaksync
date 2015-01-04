@@ -11,10 +11,13 @@
 # Copyright 2014,2015 - Tim Bird <tbird20d@yahoo.com>
 #
 # see bottom of file for data and algorithm information
-# todo for send:
-# todo for receive
+#
+# To do:
+#  - create index faster (only calculate sha1 if date, time or size change)
+#  - partition large files
 #
 # CHANGELOG
+# 0.6.0 - add support for logging
 # 0.5.2 - added transfer_skip_count to show non-transferred files
 
 import sys, os
@@ -27,14 +30,13 @@ import time
 
 # version information
 major_version = 0
-minor_version = 5
-revision = 2
+minor_version = 6 
+revision = 0 
 
 debug = 0
 verbose = 0
 transfer_count = 0
 transfer_skip_count = 0
-
 
 def usage():
 	prog_name = os.path.basename(sys.argv[0])
@@ -46,6 +48,7 @@ def usage():
   -v         be verbose
   -c <file>  specify configuration file (default is '/etc/sda.conf')
                if no config file is found, test settings are used
+  -l <file>  log operations to the speficied file
   --version  show version information, and exit
 """ % (prog_name, prog_name)
 
@@ -120,14 +123,14 @@ def read_config_file(config_path):
 		# line should have an equals in it
 		# (either single line name=value, or multi-line block start)
 		if line.find("=")==-1:
-			print_error("Syntax error in section info file %s: Expected '=' at line %d:\n%s" % (info_file, line_no, line))
+			aprint("Syntax error in section info file %s: Expected '=' at line %d:\n%s" % (info_file, line_no, line))
 			continue
 		
 		(name, value) = line.split('=', 1)
 		name = name.strip()
 		if name not in valid_attr_list.keys():
-			print "WARNING: '%s' is not a recognized configuration option" % name
-			print "at line %d in config file: %s" % (line_no, info_file)
+			aprint("WARNING: '%s' is not a recognized configuration option" % name)
+			aprint("at line %d in config file: %s" % (line_no, info_file))
 			
 		value = value.strip()
 		if value.find('"""')==-1:
@@ -141,7 +144,7 @@ def read_config_file(config_path):
 				try:
 					value = int(value) 
 				except:
-					print "ERROR: expected integer value for option '%s'" % name
+					aprint("ERROR: expected integer value for option '%s'" % name)
 					sys.exit(1)
 			setattr(config, name, value)
 		else:
@@ -169,9 +172,9 @@ def find_config_file(user_specified_config_file):
 	if user_specified_config_file:
 		# check that file exists
 		if not os.path.isfile(user_specified_config_file):
-			print "ERROR: config file '%s' not found" % \
-				user_specified_config_file
-			print "Exiting."
+			aprint("ERROR: config file '%s' not found" % \
+				user_specified_config_file)
+			aprint("Exiting.")
 			sys.exit(1)
 		else:
 			return user_specified_config_file
@@ -198,9 +201,9 @@ def get_config(default_config, config_path):
 		config = read_config_file(config_path)
 	else:
 		config = default_config
-		print "WARNING: using test config settings...."
-		print "   please specify a config file using -c, or place"
-		print "   a config file in '/etc' or your home directory."
+		aprint("WARNING: using test config settings....")
+		aprint("   please specify a config file using -c, or place")
+		aprint("   a config file in '/etc' or your home directory.")
 
 	# NOTE - source index does not have to be in the sync dir
 	# but it makes it easier to debug the script.
@@ -223,23 +226,23 @@ def validate_config(config, mode):
 
 	# do some sanity checks on the config
 	if not os.path.isdir(config.sync_dir):
-		print "ERROR: sync dir '%s' is not a directory" \
-			 % config.sync_dir
-		print "Exiting."
+		aprint("ERROR: sync dir '%s' is not a directory" \
+			 % config.sync_dir)
+		aprint("Exiting.")
 		sys.exit(1)
 
 	if mode == "send":
 		if not os.path.isdir(config.source_dir):
-			print "ERROR: source dir '%s' is not a directory" \
-				 % config.source_dir
-			print "Exiting."
+			aprint("ERROR: source dir '%s' is not a directory" \
+				 % config.source_dir)
+			aprint("Exiting.")
 			sys.exit(1)
 
 	if mode == "receive":
 		if not os.path.isdir(config.dest_dir):
-			print "ERROR: source dir '%s' is not a directory" \
-				 % config.dest_dir
-			print "Exiting."
+			aprint("ERROR: source dir '%s' is not a directory" \
+				 % config.dest_dir)
+			aprint("Exiting.")
 			sys.exit(1)
 
 
@@ -300,7 +303,7 @@ class file_entry:
 	def base_line(self):
 		epath = self.escape_path(self.path)
 		if self.sha1 == "<none>":
-			print "ERROR: sha1 not calculated yet!"
+			aprint("ERROR: sha1 not calculated yet!")
 		return "%s, %d, %s, %s, %s" % (epath, self.size,
 			self.date, self.perms, self.sha1)
 
@@ -396,8 +399,8 @@ class index_class:
 def parse_index_entry(line, base_path):
 	parts = line.split(", ")
 	if len(parts) != 6:
-		print "!!! ERROR - problem extracting index data"
-		print "line was: '%s'" % line
+		aprint("!!! ERROR - problem extracting index data")
+		aprint("line was: '%s'" % line)
 	entry_type = parts[0]
 	path = parts[1]
 	size = int(parts[2])
@@ -413,13 +416,62 @@ def parse_index_entry(line, base_path):
 	e.sha1 = sha1
 	return e
 
+# here are some routines for logging
+logf = None
+
+def open_log(log_path, mode, gen_index):
+	global logf
+	import atexit
+
+	logf = open(log_path, "a")
+	date_str = time.ctime()
+	write_log("=========================================================")
+	write_log("Log for dropsync execution at: %s" % date_str)
+	write_log("mode=%s, gen_index=%s" % (mode, gen_index))
+	write_log("=========================================================")
+
+	atexit.register(close_log)
+
+def write_config_to_log(config):
+	write_log("config:")
+	write_log("  source_dir=%s" % config.source_dir)
+	write_log("  dest_dir=%s" % config.dest_dir)
+	write_log("  sync_dir=%s" % config.sync_dir)
+	write_log("  transfer_size_limit=%s" % config.transfer_size_limit)
+	write_log("  transfer_count_limit=%s" % config.transfer_count_limit)
+	write_log("=========================================================")
+
+def write_log(msg):
+	global logf
+
+	if logf:
+		logf.write(msg+"\n")
+
+def close_log():
+	global logf
+
+	dprint("Closing log.")
+	if logf:
+		logf.close()
+	logf = None
+
+# always print (and log)
+def aprint(msg):
+	print msg
+	write_log(msg)
+
+# debug print
 def dprint(msg):
 	if debug:
-		print msg
+		aprint(msg)
 
+# verbose print
 def vprint(msg):
 	if verbose:
 		print msg
+
+	# logs always get verbose messages
+	write_log(msg)
 
 def perm_to_ascii(mode):
 	return "perm-not-done"
@@ -427,9 +479,9 @@ def perm_to_ascii(mode):
 def relative_path(full_path, base_path):
 	# trim path to be relative to base_path
 	if not full_path.startswith(base_path):
-		print "WARNING: path '%s' is not inside base path of '%s'" \
-			% (full_path, base_path)
-		print "cannot create relative path"
+		aprint("WARNING: path '%s' is not inside base path of '%s'" \
+			% (full_path, base_path))
+		aprint("cannot create relative path")
 		return full_path
 	
 	rel_path = full_path[len(base_path)+1:]
@@ -494,7 +546,7 @@ def process_path(cur_path, base_path):
 	return None
 
 def print_tree(entry):
-	print entry.to_line()
+	aprint(entry.to_line())
 	if entry.is_dir():
 		# NOTE: sub_entries should already be sorted
 		for child in entry.sub_entries:
@@ -557,9 +609,9 @@ def read_index(filename, base_path):
 		if entry.path.startswith(dir_stack[-1].path):
 			dir_stack[-1].add_sub_entry(entry)
 		else:
-			print "What happened?, parent dir should be on dir_stack"
-			print "entry.path=", entry.path	
-			print "dir_stack[-1].path=", dir_stack[-1].path
+			aprint("What happened?, parent dir should be on dir_stack")
+			aprint("entry.path=%s" % entry.path)
+			aprint("dir_stack[-1].path=%s" % dir_stack[-1].path)
 
 		# if I'm a directory, put me on dir_stack
 		if entry.is_dir():
@@ -767,11 +819,11 @@ def do_send():
 	# check that dest_index is present
 	if not os.path.isfile(config.dest_index):
 		prog_name = os.path.basename(sys.argv[0])
-		print "ERROR: could not find dest_index: '%s'" \
-			% config.dest_index
-		print "Cannot continue in send mode."
-		print "Create dest_index file by running '%s -r' on the destionation host" % prog_name
-		print "Exiting."
+		aprint("ERROR: could not find dest_index: '%s'" \
+			% config.dest_index)
+		aprint("Cannot continue in send mode.")
+		aprint("Create dest_index file by running '%s -r' on the destionation host" % prog_name)
+		aprint("Exiting.")
 		sys.exit(1)
 
 	# for DEBUGGING - receiver can leave transfer files around
@@ -888,10 +940,12 @@ def main():
 	global verbose
 	global default_config
 	global config
+	global log_file
 
 	mode = "send"
 	do_gen_index = False
 	user_specified_config_file = ""
+	log_file = None
 
 	if "-r" in sys.argv:
 		sys.argv.remove("-r")
@@ -918,21 +972,33 @@ def main():
 		vprint("Using config file: %s" % user_specified_config_file)
 		del sys.argv[index+1]
 		del sys.argv[index]
+
+	if "-l" in sys.argv:
+		index = sys.argv.index("-l")
+		log_file = sys.argv[index+1]
+		del sys.argv[index+1]
+		del sys.argv[index]
 	
 	if "--version" in sys.argv:
 		prog_name = os.path.basename(sys.argv[0])
-		print "%s version %d.%d.%d" % \
-			(prog_name, major_version, minor_version, revision)
+		aprint("%s version %d.%d.%d" % \
+			(prog_name, major_version, minor_version, revision))
 		sys.exit(0)
 
 	for arg in sys.argv[1:]:
-		print "WARNING: unknown option '%s' was specified." % arg
-		print "  option is being ignored"
+		aprint("WARNING: unknown option '%s' was specified." % arg)
+		aprint("  option is being ignored")
+
+	if log_file:
+		vprint("Using log file: %s" % log_file)
+		open_log(log_file, mode, do_gen_index)
 
 	# find, read and validate the configuration
 	config_path = find_config_file(user_specified_config_file)
 	config = get_config(default_config, config_path)
 	validate_config(config, mode)
+
+	write_config_to_log(config)
 
 	if do_gen_index:
 		# remove transfer files
@@ -951,12 +1017,12 @@ def main():
 		
 	if mode == "send":
 		do_send()
-		print "Created %d transfer files." % transfer_count
+		aprint("Created %d transfer files." % transfer_count)
 		if transfer_skip_count:
-			print "Skipped %d items that still need to be transferred." % transfer_skip_count
+			aprint("Skipped %d items that still need to be transferred." % transfer_skip_count)
 	else:
 		do_receive()
-		print "Processed %d transfer files." % transfer_count
+		aprint("Processed %d transfer files." % transfer_count)
 
 
 	vprint("Done.")

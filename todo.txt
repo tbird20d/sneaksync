@@ -18,7 +18,6 @@ f, 2013/2013-02/Legoland/IMG_20130219_153241.jpg, 1491402, 2013-02-19_15:32:42, 
      seconds after starting dropsync -r (unfortunately, I did not do verbose,
      so I didn't see any processing messages)
     - I really need faster processing for creating/updating the index
-    - add logging so I can track what is going on
     - need to automate one side or the other
       - implement sequence number handling - only act if sequence of partner
        index is greater than sequence in your index
