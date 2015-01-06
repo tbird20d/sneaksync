@@ -17,6 +17,7 @@
 #  - partition large files
 #
 # CHANGELOG
+# 0.7.2 - fix typo in usage
 # 0.7.1 - don't use directory size in index.  this fixes a bug where
 # 	  the size is different even when the dir contents are identical
 #	  (which resulted in never-converging dir entries)
@@ -38,7 +39,7 @@ import time
 # version information
 major_version = 0
 minor_version = 7
-revision = 1
+revision = 2
 
 debug = 0
 verbose = 0
@@ -59,7 +60,7 @@ def usage():
   -v         be verbose
   -c <file>  specify configuration file (default is '/etc/sda.conf')
                if no config file is found, test settings are used
-  -l <file>  log operations to the speficied file
+  -l <file>  log operations to the specified file
   --version  show version information, and exit
 """ % (prog_name, prog_name)
 
