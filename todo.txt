@@ -35,13 +35,12 @@ f, 2013/2013-02/Legoland/IMG_20130219_153241.jpg, 1491402, 2013-02-19_15:32:42, 
  - avoid errors based on incorrect -r or -s line:
    - have source_dir be empty on receiver and dest_dir be empty on sender
  - set up for periodic execution (crontab?, windows something?)
- - do incremental update of index file
-   - have a "quick" index update
-     - read index
-     - scan for date/size mismatch in filesystem
-       - update sha1 on mismatch
-   - scan for missing files
-   - scan for new files
+ - do fast update of index file
+   - read old index
+   - create new index, using old index as cache for sha1s
+     - write "get_sha1" which checks old index for matching entry and
+	uses the old sha1 if (date,time,size) match
+       - support 'force' mode, to always compute sha1 ??
  - change name to syncdir-amp (for sync_dir amplifier)
  - show progress of operation
    - assume 1000 files-per-minute indexing, and give time estimate
@@ -52,6 +51,8 @@ f, 2013/2013-02/Legoland/IMG_20130219_153241.jpg, 1491402, 2013-02-19_15:32:42, 
    - write directories with placeholder sha1, then fill in sha1 at end
      - write routine to find entry in index file 
      - write routine to update entry in index file
+ - write index to separate file, and rename at end
+	(to make index creation atomic)
  - allow for specifying omitted dirs
  - allow for specifying omitted file patterns
  - use inotify to monitor directories for changes
