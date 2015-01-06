@@ -17,6 +17,9 @@
 #  - partition large files
 #
 # CHANGELOG
+# 0.7.0 - do faster indexing: use previous index as a sha1 cache.
+#         Also, do rename on index file creation, and avoid re-reading
+# 	  the transfer_file_list execessively during sends
 # 0.6.1 - add ending time to log
 # 0.6.0 - add support for logging
 # 0.5.2 - added transfer_skip_count to show non-transferred files
@@ -31,13 +34,17 @@ import time
 
 # version information
 major_version = 0
-minor_version = 6 
-revision = 1
+minor_version = 7
+revision = 0
 
 debug = 0
 verbose = 0
 transfer_count = 0
 transfer_skip_count = 0
+
+# used to speed up index generation
+# has the previous index tree, if index file is present
+index_cache = None
 
 def usage():
 	prog_name = os.path.basename(sys.argv[0])
@@ -290,6 +297,19 @@ class file_entry:
 		return time.mktime(d.timetuple())
 
 	def calculate_sha1(self):
+		global index_cache
+
+		# check the cache first
+		if index_cache:
+			prev = index_cache.lookup_by_path(self)
+			if prev and self.size == prev.size and \
+				self.date == prev.date and \
+				self.perms == prev.perms:
+				dprint("item in cache, using previous sha1 of %s" % \
+					prev.sha1)	
+				self.sha1 = prev.sha1
+			return self.sha1
+
 		# for a file, the sha1 is the sha1 of the file content
 		f = open(self.full_path(), mode = 'rb')
 		d = sha.new()
@@ -624,37 +644,52 @@ def read_index(filename, base_path):
 	return index_class(sequence, root)
 
 def update_index(index_path, dir_to_be_indexed):
+	new_index_path = index_path+".new"
 	# if file doesn't exist, create it
 	if not os.path.isfile(index_path):
-		generate_index(index_path, dir_to_be_indexed)
-		return
+		index_cache = None
+	else:
+		# read the old index to use as a sha1 cache
+		index_cache = read_index(index_path, dir_to_be_indexed)
 
-	# FIXTHIS - should do real (sparse) update
-	# for now, just run generate_index (optimize)
-	# real sparse update should do the following:
-	#   read the existing index
-	#   scan the dir_to_be_indexed for dirs and files different from index
-	#     could use timestamps and file-sizes to speed up scan
-	#   re-write the index with new entries
-	generate_index(index_path, dir_to_be_indexed)
+	generate_index(new_index_path, dir_to_be_indexed)
+	index_cache = None
+
+	try:
+		os.rename(new_index_path, index_path)
+	except:
+		# on Windows, if the file exists, the rename may give
+		# an exception.  In this case, fall back to remove, then rename
+		try:
+			os.remove(index_path)
+			os.rename(new_index_path, index_path)
+		except:
+			aprint("ERROR trying to atomically rename index file")
+			aprint("Can't rename '%s' to '%s'" % \
+				(new_index_path, index_path))
+	
 
 def get_transfer_file_list():
 	global config
 
-	# scan sync_dir looking for transfer files
-	file_list = os.listdir(config.sync_dir)
+	# get the transfer file info from config.
+	# if not found, we haven't scanned for it.  Do that now.
+	try:
+		tfiles = config.transfer_file_list
+	except:
+		# scan sync_dir looking for transfer files
+		file_list = os.listdir(config.sync_dir)
 
-	tfiles = []
-	for filename in file_list:
-		if filename.startswith(config.transfer_prefix):
-			tfiles.append(config.sync_dir+os.path.sep+filename)
+		tfiles = []
+		for filename in file_list:
+			if filename.startswith(config.transfer_prefix):
+				tfiles.append(config.sync_dir+os.path.sep+filename)
+		config.transfer_file_list = tfiles
 
 	dprint("transfer files=%s" % tfiles)
 	return tfiles
 
-def get_next_transfer_filename():
-	global config
-
+def scan_for_max_transfer_num():
 	tfiles = get_transfer_file_list()
 
 	# get largest number used so far
@@ -667,7 +702,20 @@ def get_next_transfer_filename():
 		except:
 			pass
 
+	return max_num
+
+def get_next_transfer_filename():
+	global config
+
+	# get the max transfer number from config.
+	# if not found, we haven't scanned for it.  Do that now.
+	try:
+		max_num = config.max_transfer_num
+	except:
+		max_num = scan_for_max_transfer_num()
+
 	max_num += 1
+	config.max_transfer_num = max_num
 	filename = config.transfer_format % max_num
 	dprint("next transfer filename='%s'" % filename)
 	return filename
@@ -683,6 +731,7 @@ def make_transfer_file(entry, transfer_type):
 		(filename, entry.path))
 
 	outfile = open(filename, "w")
+	config.transfer_file_list.append(filename)
 
 	if transfer_type == "update":
 		outfile.write(entry.to_line()+"\n")
@@ -693,6 +742,7 @@ def make_transfer_file(entry, transfer_type):
 		outfile.write(entry.to_line()+"\n")
 		entry.sha1 = saved_sha1
 		outfile.close()
+		config.transfer_file_total_size += os.path.getsize(filename)
 		transfer_count += 1
 		return
 
@@ -707,14 +757,19 @@ def make_transfer_file(entry, transfer_type):
 
 	outfile.close()
 	transfer_count += 1
+	config.transfer_file_total_size += os.path.getsize(filename)
 
 def get_current_transfer_size():
-	# scan list of transfer files, and sum their sizes
-	tfiles = get_transfer_file_list()
+	try:
+		total_size = config.transfer_file_total_size
+	except:
+		# scan list of transfer files, and sum their sizes
+		tfiles = get_transfer_file_list()
 
-	total_size = 0
-	for filename in tfiles:
-		total_size += os.path.getsize(filename)
+		total_size = 0
+		for filename in tfiles:
+			total_size += os.path.getsize(filename)
+		config.transfer_file_total_size = total_size
 
 	dprint("current total transfer size=%d" % total_size)
 	return total_size
@@ -723,10 +778,7 @@ def get_current_transfer_count():
 	# count the list of transfer files
 	tfiles = get_transfer_file_list()
 
-	count = 0
-	for filename in tfiles:
-		count += 1
-
+	count = len(tfiles)
 	dprint("current transfer count=%d" % count)
 	return count
 
@@ -945,6 +997,7 @@ def main():
 	global default_config
 	global config
 	global log_file
+	global index_cache
 
 	mode = "send"
 	do_gen_index = False
@@ -1009,7 +1062,8 @@ def main():
 		for filename in get_transfer_file_list():
 			os.remove(filename)
 
-		# generate initial source_index
+		# generate initial index
+		index_cache = None
 		if mode=="send":
 			vprint("Generating source index...")
 			generate_index(config.source_index, config.source_dir)
