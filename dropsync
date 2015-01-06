@@ -17,6 +17,9 @@
 #  - partition large files
 #
 # CHANGELOG
+# 0.7.1 - don't use directory size in index.  this fixes a bug where
+# 	  the size is different even when the dir contents are identical
+#	  (which resulted in never-converging dir entries)
 # 0.7.0 - do faster indexing: use previous index as a sha1 cache.
 #         Also, do rename on index file creation, and avoid re-reading
 # 	  the transfer_file_list execessively during sends
@@ -35,7 +38,7 @@ import time
 # version information
 major_version = 0
 minor_version = 7
-revision = 0
+revision = 1
 
 debug = 0
 verbose = 0
@@ -531,7 +534,11 @@ def create_dir_entry(full_path, base_path):
 
 	rel_path = relative_path(full_path, base_path)
 
-	size = st.st_size
+  	# Ignore size for dirs.
+	# size may be different, even for directories with identical contents.
+	# IDEA: could use count of contents as size instead in create_dir_entry
+	size = 0
+
 	date = datetime.datetime.fromtimestamp(st.st_mtime)
 	date_str = date.strftime("%Y-%m-%d_%H:%M:%S")
 	perm_str = perm_to_ascii(stat.S_IMODE(st.st_mode))

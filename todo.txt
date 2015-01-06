@@ -5,7 +5,6 @@ Todo file for dropsync:
      - implement sequence number handling - only act if sequence of partner
        index is greater than sequence in your index
    - have more elegant mechanism for tracking transfer files?
-   - ignore directory size, everywhere
 
  - support partitioning files (for files larger than size limit)
    - on sender: when making transfer file:
