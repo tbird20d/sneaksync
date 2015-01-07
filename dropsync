@@ -17,6 +17,7 @@
 #  - partition large files
 #
 # CHANGELOG
+# 0.7.3 - fix index_cache usage, and move log routines
 # 0.7.2 - fix typo in usage
 # 0.7.1 - don't use directory size in index.  this fixes a bug where
 # 	  the size is different even when the dir contents are identical
@@ -39,7 +40,7 @@ import time
 # version information
 major_version = 0
 minor_version = 7
-revision = 2
+revision = 3
 
 debug = 0
 verbose = 0
@@ -80,6 +81,67 @@ default_config.sync_dir = test_dir+"sync_dir"
 # your synchronization directory
 default_config.transfer_size_limit = 1000000000
 default_config.transfer_count_limit = 1000
+
+# here are some routines for logging and printing
+logf = None
+
+def open_log(log_path, mode, gen_index):
+	global logf
+	import atexit
+
+	logf = open(log_path, "a")
+	date_str = time.ctime()
+	write_log("=========================================================")
+	write_log("Log for dropsync execution at: %s" % date_str)
+	write_log("mode=%s, gen_index=%s" % (mode, gen_index))
+	write_log("=========================================================")
+
+	atexit.register(close_log)
+
+def write_config_to_log(config):
+	write_log("config:")
+	write_log("  source_dir=%s" % config.source_dir)
+	write_log("  dest_dir=%s" % config.dest_dir)
+	write_log("  sync_dir=%s" % config.sync_dir)
+	write_log("  transfer_size_limit=%s" % config.transfer_size_limit)
+	write_log("  transfer_count_limit=%s" % config.transfer_count_limit)
+	write_log("=========================================================")
+
+def write_log(msg):
+	global logf
+
+	if logf:
+		logf.write(msg+"\n")
+
+def close_log():
+	global logf
+
+	dprint("Closing log.")
+	if logf:
+		date_str = time.ctime()
+		write_log("Ending execution at: %s" % date_str)
+		write_log("=========================================================")
+		logf.close()
+		logf = None
+
+# always print (and log)
+def aprint(msg):
+	print msg
+	write_log(msg)
+
+# debug print
+def dprint(msg):
+	if debug:
+		aprint(msg)
+
+# verbose print
+def vprint(msg):
+	if verbose:
+		print msg
+
+	# logs always get verbose messages
+	write_log(msg)
+
 
 # configuration file syntax:
 # ------------------------
@@ -303,15 +365,21 @@ class file_entry:
 	def calculate_sha1(self):
 		global index_cache
 
+		dprint("in calculate_sha1, index_cache=%s" % index_cache)
+
 		# check the cache first
 		if index_cache:
+			dprint("in calculate_sha1, have index_cache")
 			prev = index_cache.lookup_by_path(self)
+			dprint("prev=%s" % prev)
 			if prev and self.size == prev.size and \
 				self.date == prev.date and \
 				self.perms == prev.perms:
 				dprint("item in cache, using previous sha1 of %s" % \
 					prev.sha1)	
 				self.sha1 = prev.sha1
+			else:
+				dprint("no match found in cache")
 			return self.sha1
 
 		# for a file, the sha1 is the sha1 of the file content
@@ -440,66 +508,6 @@ def parse_index_entry(line, base_path):
 	e.path = e.unescape_path(path)
 	e.sha1 = sha1
 	return e
-
-# here are some routines for logging
-logf = None
-
-def open_log(log_path, mode, gen_index):
-	global logf
-	import atexit
-
-	logf = open(log_path, "a")
-	date_str = time.ctime()
-	write_log("=========================================================")
-	write_log("Log for dropsync execution at: %s" % date_str)
-	write_log("mode=%s, gen_index=%s" % (mode, gen_index))
-	write_log("=========================================================")
-
-	atexit.register(close_log)
-
-def write_config_to_log(config):
-	write_log("config:")
-	write_log("  source_dir=%s" % config.source_dir)
-	write_log("  dest_dir=%s" % config.dest_dir)
-	write_log("  sync_dir=%s" % config.sync_dir)
-	write_log("  transfer_size_limit=%s" % config.transfer_size_limit)
-	write_log("  transfer_count_limit=%s" % config.transfer_count_limit)
-	write_log("=========================================================")
-
-def write_log(msg):
-	global logf
-
-	if logf:
-		logf.write(msg+"\n")
-
-def close_log():
-	global logf
-
-	dprint("Closing log.")
-	if logf:
-		date_str = time.ctime()
-		write_log("Ending execution at: %s" % date_str)
-		write_log("=========================================================")
-		logf.close()
-		logf = None
-
-# always print (and log)
-def aprint(msg):
-	print msg
-	write_log(msg)
-
-# debug print
-def dprint(msg):
-	if debug:
-		aprint(msg)
-
-# verbose print
-def vprint(msg):
-	if verbose:
-		print msg
-
-	# logs always get verbose messages
-	write_log(msg)
 
 def perm_to_ascii(mode):
 	return "perm-not-done"
@@ -652,13 +660,16 @@ def read_index(filename, base_path):
 	return index_class(sequence, root)
 
 def update_index(index_path, dir_to_be_indexed):
+	global index_cache
+
 	new_index_path = index_path+".new"
 	# if file doesn't exist, create it
 	if not os.path.isfile(index_path):
 		index_cache = None
 	else:
 		# read the old index to use as a sha1 cache
-		index_cache = read_index(index_path, dir_to_be_indexed)
+		prev_index = read_index(index_path, dir_to_be_indexed)
+		index_cache = prev_index.root
 
 	generate_index(new_index_path, dir_to_be_indexed)
 	index_cache = None
