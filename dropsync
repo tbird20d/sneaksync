@@ -380,7 +380,11 @@ class file_entry:
 				self.sha1 = prev.sha1
 			else:
 				dprint("no match found in cache")
-			return self.sha1
+
+			if self.sha1 != "<none>":
+				return self.sha1
+			# otherwise, drop through to calculating it from the
+			# file content
 
 		# for a file, the sha1 is the sha1 of the file content
 		f = open(self.full_path(), mode = 'rb')
