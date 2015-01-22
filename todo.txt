@@ -1,41 +1,72 @@
 Todo file for dropsync:
 
- - fix bugs found:
-   - need to automate one side or the other
-     - implement sequence number handling - only act if sequence of partner
-       index is greater than sequence in your index
-   - have more elegant mechanism for tracking transfer files?
+== 1.0 features ==
+ - run program in a loop (0.8.0), with a delay before next run
+1 - automatically run the sender and receiver
+   - use sequence number to determine if update in other index has occurred
+     - when updating my_index,
+       - set my_index sequence to be other_index sequence+1
+         - create function get_sequence(index)
+     - if other_index > my_index, run
+   - specify periodicity to run (e.g. every 10 minutes, every hour)
+     - poll other_index at that interval, and run
+   - should be separate program? (no)
 
+2 - allow for specifying omitted entries (dirs and files)
+    - specify with regex line
+    - during tree walk to generate index,
+      - if match, skip
+      - on both sender and receiver side!
+    - during transfer file processing (to avoid overwriting data??)
+
+ - fix bugs found:
+   - have more elegant internal mechanism for tracking transfer files?
+     - current method uses a missing attribute and exceptions
+   - dropsync tried to transfer a file that was too big
+     - when checking size limit, include size of file about to be transferred
+
+== other features ==
  - support partitioning files (for files larger than size limit)
    - on sender: when making transfer file:
      - if file is bigger than transfer_file_size_limit, then:
        - create multiple partition files in source_dir, and restart (?)
          - don't re-create existing files with name .partyyofxx
+     - add file.partyyofxx to index file, but not in filesystem
+       - make transfer file with partyyofxx
    - on receiver: after processing transfer files,
      - if files end in .partyyofxx,
        - if there's a file with yy==xx, 
          - find ones with same leading name,
          - combine them into one file
+     - make index with partyyofxx entries
+       - put partyyofxx files directly into main file at correct offset 
+
+== nice-to-have ==
+ - support multiple indices (sync-sets) in the same sync_dir
+   - allow for specifying the index filename in the config
+     - default to source_index and dest_index?
+ - should process transfer files in numerical order (just to not look weird)
+ - keep path of indexed directory in index file (why?)
+    (and sanity check before overwriting)
  - avoid errors based on incorrect -r or -s line:
    - have source_dir be empty on receiver and dest_dir be empty on sender
- - set up for periodic execution (crontab?, windows something?)
  - change name to syncdir-amp (for sync_dir amplifier)
  - show progress of operation
    - assume 1000 files-per-minute indexing, and give time estimate
    - measure file copy time, and give time estimate
  - if sha1 is OK but other attributes are not, only send entry_line
    - don't send the content, and mark this as an attribute update only
- - allow for specifying omitted dirs
- - allow for specifying omitted file patterns
  - use inotify to monitor directories for changes
    - monitor source_dir (sender)
-   - monitor dest_dir (receiver)
-   - monitor sync_dir (both)
- - support running directly from Windows (check that paths all work)
- - test using different OS for sender and receiver (e.g. Windows to Linux)
- - support sending transfer files by e-mail
+   - monitor sync_dir (sender and receiver)
  - use an option to specify 'delete in destination' (don't do it by default)
  - handle permissions correctly
+
+== testing ==
+ - support running directly from Windows (check that paths all work)
+ - test using different OS for sender and receiver (e.g. Windows to Linux)
+   - am using cygwin to Linux, but not Windows to Linux yet
+
+== long-term ideas ==
+ - support sending transfer files by e-mail
  - send deltas instead of full files (lots of work!, but would save bandwidth)
- - keep path of indexed directory in index file
-    (and sanity check before overwriting)

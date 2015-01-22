@@ -5,7 +5,7 @@
 # This program allows you to keep a large data directory synchronized
 # with one or more backups, using a synchronized network folder
 # (like dropbox).  It does this while not exceeding the file limits
-# of the network folder (e.g. 5 gig).  The network folder is used
+# of the network folder (e.g. 2 gig).  The network folder is used
 # for data transfers, but not long-term storage
 #
 # Copyright 2014,2015 - Tim Bird <tbird20d@yahoo.com>
@@ -13,10 +13,15 @@
 # see bottom of file for data and algorithm information
 #
 # To do:
-#  - create index faster (only calculate sha1 if date, time or size change)
+#  - write correct sequence number in index file (other_index sequence + 1)
+#  - on receiver wakeup, detect source-index change
+#  - on sender wakeup, detect dest-index change
+#  - on sender wakeup, detect source directory change
 #  - partition large files
 #
 # CHANGELOG
+# 0.8.0 - support -p option to cause program to loop
+# 0.7.4 - fix problem with <none> sha1 entries in index
 # 0.7.3 - fix index_cache usage, and move log routines
 # 0.7.2 - fix typo in usage
 # 0.7.1 - don't use directory size in index.  this fixes a bug where
@@ -39,8 +44,8 @@ import time
 
 # version information
 major_version = 0
-minor_version = 7
-revision = 3
+minor_version = 8
+revision = 0
 
 debug = 0
 verbose = 0
@@ -63,6 +68,8 @@ def usage():
                if no config file is found, test settings are used
   -l <file>  log operations to the specified file
   --version  show version information, and exit
+  -p <period> run the program in a loop, and poll for changes every
+	      <period> minutes
 """ % (prog_name, prog_name)
 
 # create a class for objects with arbitrary attributes
@@ -816,7 +823,8 @@ def within_transfer_limit(entry):
 			entry.path)
 		transfer_skip_count += 1
 		return False
-	elif get_current_transfer_size() >= config.transfer_size_limit:
+	elif get_current_transfer_size() + entry.size >= \
+		config.transfer_size_limit:
 		vprint("transfer size limit reached, not sending '%s' this time" % \
 			entry.path)
 		transfer_skip_count += 1
@@ -1021,11 +1029,14 @@ def main():
 	global config
 	global log_file
 	global index_cache
+	global transfer_count
+	global transfer_skip_count
 
 	mode = "send"
 	do_gen_index = False
 	user_specified_config_file = ""
 	log_file = None
+	period = 0
 
 	if "-r" in sys.argv:
 		sys.argv.remove("-r")
@@ -1058,6 +1069,19 @@ def main():
 		log_file = sys.argv[index+1]
 		del sys.argv[index+1]
 		del sys.argv[index]
+
+	if "-p" in sys.argv:
+		index = sys.argv.index("-p")
+		period_str = sys.argv[index+1]
+		del sys.argv[index+1]
+		del sys.argv[index]
+		try:
+			period = int(period_str)
+		except:
+			aprint("ERROR: problem parsing period argument: '%s'" \
+				% period_str)
+			aprint("Exiting.")
+			sys.exit(1)
 	
 	if "--version" in sys.argv:
 		prog_name = os.path.basename(sys.argv[0])
@@ -1096,15 +1120,39 @@ def main():
 
 		sys.exit(0)
 		
-	if mode == "send":
-		do_send()
-		aprint("Created %d transfer files." % transfer_count)
-		if transfer_skip_count:
-			aprint("Skipped %d items that still need to be transferred." % transfer_skip_count)
-	else:
-		do_receive()
-		aprint("Processed %d transfer files." % transfer_count)
+	while True:
+		if mode == "send":
+			do_send()
+			aprint("Created %d transfer files." % transfer_count)
+			if transfer_skip_count:
+				aprint("Skipped %d items that still need to be transferred." % transfer_skip_count)
+		else:
+			do_receive()
+			aprint("Processed %d transfer files." % transfer_count)
 
+		if not period:
+			break
+
+		close_log()
+
+		# re-initialize global variables and configs
+		try:
+			del(config.transfer_file_list)
+			del(config.transfer_file_total_size)
+			del(config.max_transfer_num)
+		except:
+			pass
+		transfer_count = 0
+		transfer_skip_count = 0
+		index_cache = None
+
+		# while other_index sequence <= my_index sequence:
+		# wait for next wakeup
+		vprint("Waiting for %d minutes..." % period)
+		time.sleep(period*60)
+
+		# restart logging
+		open_log(log_file, mode, do_gen_index)
 
 	vprint("Done.")
 	
