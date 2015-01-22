@@ -1,0 +1,27 @@
+Here is some information about efficiency and run times:
+
+First run (version 0.4.0 or something):
+ - 46 minutes to send
+ - 126 minutes (2 hours) to receive
+(see below)
+
+This was before I implemented fast indexing (or logging)
+
+
+---------
+First run on Windows machine:
+$ time dropsync -i
+
+real    46m15.417s
+user    10m47.543s
+sys     2m46.390s
+
+First run on Linux machine:
+$ time dropsync -r -i
+
+real	126m37.026s
+user	10m1.154s
+sys	1m54.139s
+
+this only covered the "Pictures" directory, with about 50,000 files
+The disk at work was USB (NOT on a USB 3.0 port)
