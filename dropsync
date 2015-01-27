@@ -20,6 +20,7 @@
 #  - partition large files
 #
 # CHANGELOG
+# 0.8.5 - support exclude_list in config, for omitting paths by re pattern
 # 0.8.0 - support -p option to cause program to loop
 # 0.7.4 - fix problem with <none> sha1 entries in index
 # 0.7.3 - fix index_cache usage, and move log routines
@@ -39,13 +40,14 @@ import sha
 import stat
 import datetime
 import time
+import re
 #import pdb
 #pdb.set_trace()
 
 # version information
 major_version = 0
 minor_version = 8
-revision = 0
+revision = 5
 
 debug = 0
 verbose = 0
@@ -70,6 +72,8 @@ def usage():
   --version  show version information, and exit
   -p <period> run the program in a loop, and poll for changes every
 	      <period> minutes
+  -x <pat>   exclude directory or file matching the indicated re pattern
+             This option may be specified multiple times
 """ % (prog_name, prog_name)
 
 # create a class for objects with arbitrary attributes
@@ -88,6 +92,8 @@ default_config.sync_dir = test_dir+"sync_dir"
 # your synchronization directory
 default_config.transfer_size_limit = 1000000000
 default_config.transfer_count_limit = 1000
+default_config.exclude_list = ""
+default_config.exclude_re_list = []
 
 # here are some routines for logging and printing
 logf = None
@@ -174,6 +180,7 @@ def read_config_file(config_path):
 		"sync_dir":'s',	# directory to use for transfers
 		"transfer_size_limit":'d',	# limit, in bytes, of transfer files
 		"transfer_count_limit":'d',	# max number of transfer files
+		"exclude_list":'s',	# list of regex patterns to exclude from transfer
 	}	
 	config = stub_class()
 	in_block = 0
@@ -277,7 +284,7 @@ def find_config_file(user_specified_config_file):
 	# nothing found...
 	return ""
 
-def get_config(default_config, config_path):
+def get_config(default_config, config_path, command_line_re_list):
 	if config_path:
 		config = read_config_file(config_path)
 	else:
@@ -298,6 +305,20 @@ def get_config(default_config, config_path):
 	# directories should be absolute paths
 	config.source_dir = os.path.abspath(config.source_dir)
 	config.dest_dir = os.path.abspath(config.dest_dir)
+
+	config.exclude_re_list = []
+	exclude_list = config.exclude_list.split("\n")
+	exclude_list.extend(command_line_re_list)
+	try:
+		for exclude_line in exclude_list:
+			exclude_line = exclude_line.strip()
+			if not exclude_line:
+				continue
+			re_pat = re.compile(exclude_line)
+			config.exclude_re_list.append(re_pat)
+	except:
+		aprint("Error: could not process exclude list '%s'\n" % \
+			config.exclude_list)
 	
 	return config
 
@@ -540,7 +561,6 @@ def create_file_entry(full_path, base_path):
 	rel_path = relative_path(full_path, base_path)
 	
 	size = st.st_size
-	# FIXTHIS - should this be ctime or mtime?
 	date = datetime.datetime.fromtimestamp(st.st_mtime)
 	date_str = date.strftime("%Y-%m-%d_%H:%M:%S")
 	perm_str = perm_to_ascii(stat.S_IMODE(st.st_mode))
@@ -569,6 +589,12 @@ def create_dir_entry(full_path, base_path):
 def process_path(cur_path, base_path):
 	dprint("Processing path '%s'" % cur_path)
 	full_path = os.path.abspath(cur_path)
+
+	# ignore items that match any regex pattern in the exclude list
+	for re_pat in config.exclude_re_list:
+		if re_pat.search(cur_path):
+			dprint("Omitting path '%s' due to exclude pattern '%s'\n" % (cur_path, re_pat.pattern))
+			return None
 
 	# if it's a regular file, just create the node
 	if os.path.isfile(full_path):
@@ -948,6 +974,16 @@ def process_transfer_file(filename):
 	vprint("Processing transfer file %s, for path '%s'" \
 		% (filename[-5:], entry.path))
 
+	# ignore items that match any regex pattern in the exclude list
+	for re_pat in config.exclude_re_list:
+		if re_pat.search(entry.path):
+			dprint("Omitting path '%s' due to exclude pattern '%s'\n" % (cur_path, re_pat.pattern))
+			f.close()
+			dprint("Removing transfer file")
+			os.remove(filename)
+			transfer_count += 1
+			return
+
 	# NOTE - transfer file is still open at this point
 
 	if entry.sha1 == "<deleted>":
@@ -1037,6 +1073,7 @@ def main():
 	user_specified_config_file = ""
 	log_file = None
 	period = 0
+	re_list = []
 
 	if "-r" in sys.argv:
 		sys.argv.remove("-r")
@@ -1082,6 +1119,13 @@ def main():
 				% period_str)
 			aprint("Exiting.")
 			sys.exit(1)
+
+	while "-x" in sys.argv:
+		index = sys.argv.index("-x")
+		re_item = sys.argv[index+1]
+		del sys.argv[index+1]
+		del sys.argv[index]
+		re_list.append(re_item)
 	
 	if "--version" in sys.argv:
 		prog_name = os.path.basename(sys.argv[0])
@@ -1099,7 +1143,7 @@ def main():
 
 	# find, read and validate the configuration
 	config_path = find_config_file(user_specified_config_file)
-	config = get_config(default_config, config_path)
+	config = get_config(default_config, config_path, re_list)
 	validate_config(config, mode)
 
 	write_config_to_log(config)
