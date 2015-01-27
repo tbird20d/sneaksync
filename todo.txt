@@ -1,6 +1,16 @@
 Todo file for dropsync:
 
 == 1.0 features ==
+2 - support partitioning files (for files larger than size limit)
+   - on sender: when making transfer file:
+     - if file is bigger than transfer_file_size_limit, then:
+       - add file.partyyofxx to index file, but not in filesystem
+         - make transfer file with extension .partyyofxx
+   - on receiver: after processing transfer files,
+     - if files end in .partyyofxx,
+       - put .partyyofxx data directly into large file at correct offset 
+     - make index with .partyyofxx entries
+
 1 - automatically run the sender and receiver
    - use sequence number to determine if update in other index has occurred
      - when updating my_index,
@@ -13,41 +23,29 @@ Todo file for dropsync:
        - make a transfer list? (only receiver would check it, and it's not
           running)
 
-2 - allow for specifying omitted entries (dirs and files)
-    - specify with regex line
-    - during tree walk to generate index,
-      - if item matches regex, skip
-        - don't put in index
-        - don't process sub-directories
-      - do this on both sender and receiver side!
-    - during transfer file processing (to avoid overwriting data??)
-
  - fix bugs found:
    - IMG_7449.JPG is not synch-ing.  It was transfered several times, and
      processed by the receiver multiple times.  Why?
-   - internal mechanism for tracking transfer files is kludgy
-     - current method uses a missing attribute and exceptions
-   - dropsync doesn't integrate the logs from each side
    - need to lock each side, to keep from processing partially written transfer
      or index files
      - create a file lock - if present, hold off
-   - have period be from start of program, not end of operations
-     - so if started at 8:00 am, then run would be 10:00 at (at period 120),
-       instead of, say 10:13 (assuming a 13-minute run)
-
-3 - support partitioning files (for files larger than size limit)
-   - on sender: when making transfer file:
-     - if file is bigger than transfer_file_size_limit, then:
-       - add file.partyyofxx to index file, but not in filesystem
-         - make transfer file with extension .partyyofxx
-   - on receiver: after processing transfer files,
-     - if files end in .partyyofxx,
-       - put .partyyofxx data directly into large file at correct offset 
-     - make index with .partyyofxx entries
 
 == other features ==
 
+== low-priority bugs ==
+   - internal mechanism for tracking transfer files is kludgy
+     - current method uses a missing attribute and exceptions
+   - dropsync doesn't integrate the logs from each side
+   - don't process a transfer file if content size doesn't match
+     entry size
+
 == nice-to-have ==
+ - have an option for just comparing source and destination index, to
+   report the current size of the difference between the two (how much is
+   currently out-of-sync)
+ - have period be from start of program, not end of operations
+   - so if started at 8:00 am, then run would be 10:00 at (at period 120),
+     instead of, say 10:13 (assuming a 13-minute run)
  - support multiple indices (sync-sets) in the same sync_dir
    - allow for specifying the index filename in the config
      - default to source_index and dest_index?
@@ -68,9 +66,6 @@ Todo file for dropsync:
    - monitor sync_dir (sender and receiver)
  - use an option to specify 'delete in destination' (don't do it by default)
  - handle permissions correctly
- - have an option for just comparing source and destination index, to
-   report the current size of the difference between the two (how much is
-   currently out-of-sync)
 
 == testing ==
  - support running directly from Windows (check that paths all work)
