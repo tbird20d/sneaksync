@@ -6,22 +6,26 @@ Todo file for dropsync:
      - if file is bigger than transfer_file_size_limit, then:
        - add file.partyyofxx to index file, but not in filesystem
          - make transfer file with extension .partyyofxx
+         - transfer type is 'p'
    - on receiver: after processing transfer files,
      - if files end in .partyyofxx,
        - put .partyyofxx data directly into large file at correct offset 
      - make index with .partyyofxx entries
 
 1 - automatically run the sender and receiver
+   1 - add lock file?
    - use sequence number to determine if update in other index has occurred
      - when updating my_index,
        - set my_index sequence to be other_index sequence+1
          - create function get_sequence(index)
      - if other_index > my_index, run
-   - add lock file?
    - don't run unless transfer files have been synched to destination
      - detect transfer complete (how?)
        - make a transfer list? (only receiver would check it, and it's not
           running)
+         - would have list of all expected transfer files
+         - receiver can postpone running if transfer files haven't shown up yet
+	    - should check frequently and see if anything is changing in sync_dir
 
  - fix bugs found:
    - IMG_7449.JPG is not synch-ing.  It was transfered several times, and
@@ -31,6 +35,14 @@ Todo file for dropsync:
      - create a file lock - if present, hold off
 
 == other features ==
+ - support USB-stick mode:
+   - auto-run on insertion of stick
+     - see http://www.instructables.com/id/How-to-make-flash-drive-that-copys-users-files-si/4/
+     - add marker file to identify source dir on source machine
+
+   - auto-detect sender or receiver mode
+   - sync and unmount when transfer is complete
+   - make a test config file for a USB stick
 
 == low-priority bugs ==
    - internal mechanism for tracking transfer files is kludgy
@@ -40,6 +52,7 @@ Todo file for dropsync:
      entry size
 
 == nice-to-have ==
+ - make standalone Windows executable - use py2exe
  - have an option for just comparing source and destination index, to
    report the current size of the difference between the two (how much is
    currently out-of-sync)
