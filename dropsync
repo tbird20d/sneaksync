@@ -13,13 +13,15 @@
 # see bottom of file for data and algorithm information
 #
 # To do:
+#  - fix bug with receiver not updating sha1 in index (due to caching)
+#    after processing part file
 #  - write correct sequence number in index file (other_index sequence + 1)
 #  - on receiver wakeup, detect source-index change
 #  - on sender wakeup, detect dest-index change
 #  - on sender wakeup, detect source directory change
-#  - partition large files
 #
 # CHANGELOG
+# 0.9.0 - support partitions
 # 0.8.5 - support exclude_list in config, for omitting paths by re pattern
 # 0.8.0 - support -p option to cause program to loop
 # 0.7.4 - fix problem with <none> sha1 entries in index
@@ -46,8 +48,8 @@ import re
 
 # version information
 major_version = 0
-minor_version = 8
-revision = 5
+minor_version = 9
+revision = 0
 
 debug = 0
 verbose = 0
@@ -91,6 +93,7 @@ default_config.sync_dir = test_dir+"sync_dir"
 # Transfer limits should match any restrictions on
 # your synchronization directory
 default_config.transfer_size_limit = 1000000000
+default_config.part_size = 600000000
 default_config.transfer_count_limit = 1000
 default_config.exclude_list = ""
 default_config.exclude_re_list = []
@@ -181,6 +184,7 @@ def read_config_file(config_path):
 		"transfer_size_limit":'d',	# limit, in bytes, of transfer files
 		"transfer_count_limit":'d',	# max number of transfer files
 		"exclude_list":'s',	# list of regex patterns to exclude from transfer
+		"part_size":'d',	# size of file parts
 	}	
 	config = stub_class()
 	in_block = 0
@@ -358,10 +362,18 @@ class file_entry:
 		# path is relative to the base_path (not an absolute path)
 		self.path = path
 		self.size = size
+		self.start_offset = 0
+		self.end_offset = size
 		self.date = date
 		self.perms = perms
 		self.sha1 = "<none>"
 		self.base_path = base_path
+	
+		# technically true, but use this since this is not a part
+		self.is_last_part = False
+	
+	def is_part(self):
+		return False
 	
 	def full_path(self):
 		return self.base_path + os.path.sep + self.path
@@ -393,8 +405,6 @@ class file_entry:
 	def calculate_sha1(self):
 		global index_cache
 
-		dprint("in calculate_sha1, index_cache=%s" % index_cache)
-
 		# check the cache first
 		if index_cache:
 			dprint("in calculate_sha1, have index_cache")
@@ -414,13 +424,19 @@ class file_entry:
 			# otherwise, drop through to calculating it from the
 			# file content
 
-		# for a file, the sha1 is the sha1 of the file content
+		# for a file or part, get sha1 of (part of) the file content
 		f = open(self.full_path(), mode = 'rb')
+		offset = self.start_offset
+		f.seek(offset)
 		d = sha.new()
 		buf = 0
-		while buf != b'':
-			buf = f.read(32768)
+		while buf != b'' and offset < self.end_offset:
+			# only read to end_offset (not into the next part)
+			amount_to_read = min(32768, self.end_offset - offset)
+			buf = f.read(amount_to_read)
 			d.update(buf)
+			offset += len(buf)
+
 		f.close()
 		self.sha1 = d.hexdigest()
 		return self.sha1
@@ -515,6 +531,76 @@ class dir_entry(file_entry):
 						break
 			return found
 
+# path for file ends in ".partyyofxx"
+# e.g.  testfile.part02of13
+#               01234567890
+class part_entry(file_entry):
+	def __init__(self, path, size, date, perms, base_path):
+		# path is stored in unescaped format
+		# path is relative to the base_path (not an absolute path)
+		dprint("Creating part for file '%s'" % path)
+		self.path = path
+		self.is_last_part = False
+
+		# check for and parse partyyofxx
+		if len(path)<12:
+			aprint("ERROR: invalid path '%s' for part_entry class\n", path)
+			part_desc = ".part00of99"
+		else:
+			part_desc = path[-11:]
+
+		pat = "[.]part[0-9][0-9]of[0-9][0-9]"
+		if not re.match(pat, part_desc):
+			aprint("ERROR: invalid path %s for part_entry class\n");
+		part_num = int(part_desc[5:7])
+		part_max = int(part_desc[9:11])
+		dprint("part_num=%d" % part_num)
+		dprint("part_max=%d" % part_max)
+		dprint("size=%d" % size)
+
+		# real_path has the path to the filename this is a part of
+		self.real_path = path[:-11]
+		self.start_offset = (part_num-1) * config.part_size
+		self.end_offset = part_num * config.part_size
+
+		# guess the length of the whole file
+		self.last_offset = (part_max-1) * config.part_size + 1
+
+		# need to adjust end_offset of last piece 
+		# if creating part_entry from entry line, size will be
+		#    the size of the part, and size specified will be smaller 
+		#    than the part_size
+		# if creating part_entry from a file, size will be the
+		#    size of the whole file (> than part_size)
+		if part_num == part_max:
+			self.is_last_part = True
+			if size <= config.part_size:
+				self.end_offset = self.start_offset + size
+				self.last_offset = self.end_offset
+			else:
+				self.end_offset = size
+				self.last_offset = size
+
+		dprint("start_offset=%d" % self.start_offset)
+		dprint("end_offset=%d" % self.end_offset)
+		dprint("last_offset=%d" % self.last_offset)
+
+		self.size = self.end_offset - self.start_offset
+		dprint("self.size=%d" % self.size)
+		self.date = date
+		self.perms = perms
+		self.sha1 = "<none>"
+		self.base_path = base_path
+
+	def is_part(self):
+		return True
+
+	def full_path(self):
+		return self.base_path + os.path.sep + self.real_path
+	
+	def to_line(self):
+		return "p, "+self.base_line()
+
 
 class index_class:
 	def __init__(self, sequence, root):
@@ -535,6 +621,8 @@ def parse_index_entry(line, base_path):
 	
 	if entry_type == "f":
 		e = file_entry(path, size, date, perms, base_path)
+	elif entry_type == "p":
+		e = part_entry(path, size, date, perms, base_path)
 	else:
 		e = dir_entry(path, size, date, perms, base_path)
 	e.path = e.unescape_path(path)
@@ -586,6 +674,29 @@ def create_dir_entry(full_path, base_path):
 	entry = dir_entry(rel_path, size, date_str, perm_str, base_path)
 	return entry
 
+def create_part_entries(fentry, base_path):
+	entries = []
+
+	path = fentry.path
+	size = fentry.size
+	date = fentry.date
+	perms = fentry.perms
+	
+	part_max = size / config.part_size
+	if size % config.part_size > 0:
+		part_max += 1
+	part_num = 1
+	while part_num <= part_max:
+		part_desc = ".part%02dof%02d" % (part_num, part_max)
+		part_path = path+part_desc
+		entry = part_entry(part_path, size, date, perms, base_path)
+		entry.calculate_sha1()
+		entries.append(entry)
+		part_num += 1
+	return entries
+
+# returns a list containing: 1) a single file, 2) a single directory, or
+#    3) a file and multiple part entries
 def process_path(cur_path, base_path):
 	dprint("Processing path '%s'" % cur_path)
 	full_path = os.path.abspath(cur_path)
@@ -599,7 +710,11 @@ def process_path(cur_path, base_path):
 	# if it's a regular file, just create the node
 	if os.path.isfile(full_path):
 		entry = create_file_entry(full_path, base_path)
-		return entry
+		entries = [entry]
+		if entry.size > config.part_size:
+			part_entries = create_part_entries(entry, base_path)
+			entries.extend(part_entries)
+		return entries
 	
 	# if a directory, create the node and populate children before
 	# calculating the sha1
@@ -611,12 +726,13 @@ def process_path(cur_path, base_path):
 		for item in item_list:
 			item_path = os.path.join(full_path, item)
 			
-			child = process_path(item_path, base_path)
-			if child:
-				entry.add_sub_entry(child)
+			child_list = process_path(item_path, base_path)
+			if child_list:
+				for child in child_list:
+					entry.add_sub_entry(child)
 
 		entry.calculate_sha1()
-		return entry
+		return [entry]
 			
 	# skip things that are not files or directories
 	# (symlinks, device files, etc.)
@@ -648,7 +764,12 @@ def write_index(filename, index):
 		
 def generate_index(filename, dir_to_be_indexed):
 	# scan directory, generating index lines
-	entry = process_path(dir_to_be_indexed, dir_to_be_indexed)
+	entry_list = process_path(dir_to_be_indexed, dir_to_be_indexed)
+
+	# sanity check - should return a list containing a single dir entry
+	if not entry_list or len(entry_list)>1 or not entry_list[0].is_dir():
+		aprint("ERROR: unexpected result from process_path")
+	entry = entry_list[0]
 
 	# use starting sequence of 0000...01
 	index = index_class(1, entry)
@@ -777,7 +898,6 @@ def get_next_transfer_filename():
 	return filename
 		
 
-# only called for files, not directories
 # transfer_type must be one of: "remove" or "update"
 def make_transfer_file(entry, transfer_type):
 	global transfer_count
@@ -804,11 +924,16 @@ def make_transfer_file(entry, transfer_type):
 
 	if not entry.is_dir():
 		# put file content after entry line
+		# content is from entry.start_offset to entry.end_offset
 		infile = open(entry.full_path(), "rb")
+		offset = entry.start_offset
+		infile.seek(offset)
 		buf = 0
-		while buf != b'':
-			buf = infile.read(32768)
+		while buf != b'' and offset < entry.end_offset:
+			amount_to_read = min(32768, entry.end_offset - offset)
+			buf = infile.read(amount_to_read)
 			outfile.write(buf)
+			offset += len(buf)
 		infile.close()
 
 	outfile.close()
@@ -857,41 +982,6 @@ def within_transfer_limit(entry):
 		return False
 	else:
 		return True
-
-######################## old action system ############################
-def action_send(entry):
-	dprint("in action_send for '%s'" % entry)
-
-	if not within_transfer_limit(entry):
-		return
-
-	make_transfer_file(entry, "update")
-
-def action_remove(entry):
-	dprint("in action_remove for '%s'" % entry)
-	if not within_transfer_limit(entry):
-		return
-
-	if not entry.is_dir():
-		make_transfer_file(entry, "remove")
-		return
-	else:
-		for child in entry.sub_entries:
-			make_transfer_file(child, "remove")
-		make_transfer_file(entry, "remove")
-
-def walk_tree(entry, other_tree, action):
-	# look up entry in other tree, if different, do callback
-	dprint("walking tree at entry %s" % entry)
-	other = other_tree.lookup_by_path(entry)
-	dprint("other= %s" % other)
-	if other == None or not other.attr_match(entry):
-		action(entry)
-
-	if entry.is_dir():
-		dprint("%s is a dir, walking children" % entry.path)
-		for child in entry.sub_entries:
-			walk_tree(child, other_tree, action)
 
 ######################## new action system ############################
 def walk_tree_for_updates(entry, other_tree):
@@ -1026,10 +1116,29 @@ def process_transfer_file(filename):
 
 		# copy the file contents, from remainder of transfer file
 		outfile = open(entry.full_path(), "wb")
+		offset = entry.start_offset
+		outfile.seek(offset)
 		buf = 0
-		while buf != b'':
-			buf = f.read(32768)
+		while buf != b'' and offset < entry.end_offset:
+			amount_to_read = min(32768, entry.end_offset - offset)
+			buf = f.read(amount_to_read)
 			outfile.write(buf)
+			offset += len(buf)
+
+		aprint("finished writing at offset %d" % offset)
+
+		# if entry is a part, pad the file to be close to correct
+		# size
+		# this is needed to force the dest_index to write parts
+		# for large files
+		if entry.is_part():
+			aprint("writing byte at last_offset %d" % \
+				(entry.last_offset-1))
+			outfile.seek(entry.last_offset-1)
+			outfile.write('$')
+			# FIXTHIS - not sure next code is needed
+			if not entry.is_last_part:
+				outfile.write("$")
 
 		outfile.close()
 		f.close()
@@ -1050,6 +1159,9 @@ def do_receive():
 
 	# process any transfer files
 	tfiles = get_transfer_file_list()
+
+	# it is important for part entries to process them in order
+	tfiles.sort()
 
 	for filename in tfiles:
 		process_transfer_file(filename)
