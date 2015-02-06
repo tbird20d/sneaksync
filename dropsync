@@ -695,6 +695,7 @@ def create_part_entries(fentry, base_path):
 	while part_num <= part_max:
 		part_desc = ".part%02dof%02d" % (part_num, part_max)
 		part_path = path+part_desc
+		dprint("in create_part_entries, size=%d" % size)
 		entry = part_entry(part_path, size, date, perms, base_path)
 		entry.calculate_sha1()
 		entries.append(entry)
@@ -931,6 +932,8 @@ def make_transfer_file(entry, transfer_type):
 	if not entry.is_dir():
 		# put file content after entry line
 		# content is from entry.start_offset to entry.end_offset
+		dprint("trying to write %d bytes for file %s" % \
+			(entry.size, entry.full_path()))
 		infile = open(entry.full_path(), "rb")
 		offset = entry.start_offset
 		infile.seek(offset)
@@ -1123,6 +1126,7 @@ def process_transfer_file(filename):
 		# copy the file contents, from remainder of transfer file
 		outfile = open(entry.full_path(), "wb")
 		offset = entry.start_offset
+		dprint("seeking to offset %d" % offset)
 		outfile.seek(offset)
 		buf = 0
 		while buf != b'' and offset < entry.end_offset:
@@ -1131,14 +1135,14 @@ def process_transfer_file(filename):
 			outfile.write(buf)
 			offset += len(buf)
 
-		aprint("finished writing at offset %d" % offset)
+		dprint("finished writing at offset %d" % offset)
 
 		# if entry is a part, pad the file to be close to correct
 		# size
 		# this is needed to force the dest_index to write parts
 		# for large files
 		if entry.is_part():
-			aprint("writing byte at last_offset %d" % \
+			dprint("writing byte at last_offset %d" % \
 				(entry.last_offset-1))
 			outfile.seek(entry.last_offset-1)
 			outfile.write('$')
