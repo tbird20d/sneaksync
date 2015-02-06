@@ -61,7 +61,6 @@ Todo file for dropsync:
  - support multiple indices (sync-sets) in the same sync_dir
    - allow for specifying the index filename in the config
      - default to source_index and dest_index?
- - should process transfer files in numerical order (just to not look weird)
  - keep path of indexed directory in index file (why?)
     (and sanity check before overwriting)
  - avoid errors based on incorrect -r or -s line:
@@ -71,12 +70,14 @@ Todo file for dropsync:
  - show progress of operation
    - assume 1000 files-per-minute indexing, and give time estimate
    - measure file copy time, and give time estimate
+   - use terminal code to update index line every 2 seconds
+     - find total number of files to index first, and give a yy of xx status?
  - if sha1 is OK but other attributes are not, only send entry_line
    - don't send the content, and mark this as an attribute update only
  - use inotify to monitor directories for changes
    - monitor source_dir (sender)
    - monitor sync_dir (sender and receiver)
- - use an option to specify 'delete in destination' (don't do it by default)
+ - use an option to control 'delete in destination' (don't do it by default)
  - handle permissions correctly
 
 == testing ==
