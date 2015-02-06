@@ -1,0 +1,88 @@
+#!/usr/bin/python
+
+# collect numbers from stdin
+# print a total
+
+import sys
+import math
+
+verbose = 0
+show_input = 0
+show_count = 0
+human_units = 0
+quiet = 0
+
+if "-v" in sys.argv:
+	verbose = 1
+
+if "-s" in sys.argv:
+	show_input = 1
+
+if "-c" in sys.argv:
+	show_count = 1
+
+if "-q" in sys.argv:
+	quiet = 1
+
+
+if "-h" in sys.argv or "--help" in sys.argv:
+	print """Usage: <input> | add [options]
+-h  show this help
+-s  show input lines
+-c  show a count of numbers found
+-q  be more quiet (only show the number, not any other text)
+-u  show result in human units (K, M, G)
+-v  show verbose debug output
+"""
+	sys.exit(1)
+
+if "-u" in sys.argv:
+	human_units = 1
+
+total = 0
+count = 0
+lines = sys.stdin.readlines()
+nums=[]
+for line in lines:
+	line = line.strip()
+	if show_input:
+		print line
+	if not line:
+		continue
+	try:
+		token = line.split()[0]
+		total += float(token)
+		count += 1
+	except:
+		if verbose:
+			print "'%s' is not a number" % line
+
+if count:
+	if show_count:
+		if not quiet:
+			print "count=",
+		print "%s" % count
+
+	# convert back to int if there's no decimal part
+	if total == int(total):
+		total = int(total)
+
+	suffix = ""
+	if human_units:
+		total = float(total)
+		if total > 1100000000:
+			total = float(int(total/100000000))/10
+			suffix = "G"
+		elif total > 1100000:
+			total = float(int(total/100000))/10
+			suffix = "M"
+		elif total > 1100:
+			total = float(int(total/100))/10
+			suffix = "K"
+
+	# now print the result
+	if not quiet:
+		print "total =",
+	print "%s%s" % (total, suffix)
+else:
+	print "Error: no numbers found"
