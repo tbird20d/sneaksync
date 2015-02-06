@@ -3,14 +3,13 @@ Todo file for dropsync:
 == 1.0 features ==
 2 - support partitioning files (for files larger than size limit)
    - on sender: when making transfer file:
-     - if file is bigger than transfer_file_size_limit, then:
-       - add file.partyyofxx to index file, but not in filesystem
-         - make transfer file with extension .partyyofxx
-         - transfer type is 'p'
-   - on receiver: after processing transfer files,
-     - if files end in .partyyofxx,
-       - put .partyyofxx data directly into large file at correct offset 
-     - make index with .partyyofxx entries
+     - don't make transfer file for a file if it is larger than part_size
+   - on receiver: while processing transfer files,
+     - make a .partyyofxx file for the last part copied
+       - remove other .partyyofxx files
+   - on receiver: when making dest_index
+     - if a .partyyofxx file exists, then force a re-caculate_sha1 for the file
+       (that is, don't use any cached value)
 
 1 - automatically run the sender and receiver
    1 - add lock file?
