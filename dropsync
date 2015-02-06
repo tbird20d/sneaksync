@@ -16,7 +16,6 @@
 #  - fix bug with receiver not updating sha1 in index (due to caching)
 #    after processing part file
 #  - write correct sequence number in index file (other_index sequence + 1)
-#  - on receiver wakeup, detect source-index change
 #  - on sender wakeup, detect dest-index change
 #  - on sender wakeup, detect source directory change
 #
@@ -1139,16 +1138,16 @@ def process_transfer_file(filename):
 
 		dprint("finished writing at offset %d" % offset)
 
-		# if entry is a part, pad the file to be close to correct
-		# size
-		# this is needed to force the dest_index to write parts
-		# for large files
+		# if entry is a part, pad the file to be close to correct size
+		# this is needed to force the dest_index to have the correct
+		# number of parts for large files
 		if entry.is_part():
 			dprint("writing byte at last_offset %d" % \
 				(entry.last_offset-1))
 			outfile.seek(entry.last_offset-1)
 			outfile.write('$')
 			# FIXTHIS - not sure next code is needed
+			# if not at the last part, write into the next part
 			if not entry.is_last_part:
 				outfile.write("$")
 
