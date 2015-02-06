@@ -21,6 +21,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 0.9.1 - fix bug with config missing an exclude_list
 # 0.9.0 - support partitions
 # 0.8.5 - support exclude_list in config, for omitting paths by re pattern
 # 0.8.0 - support -p option to cause program to loop
@@ -49,7 +50,7 @@ import re
 # version information
 major_version = 0
 minor_version = 9
-revision = 0
+revision = 1
 
 debug = 0
 verbose = 0
@@ -82,9 +83,17 @@ def usage():
 class stub_class:
 	pass
 
+# create a class for the configuration
+class config_class:
+	def __init__(self):
+		self.exclude_list = ""
+		self.exclude_re_list = []
+		# default part_size to 600M
+		self.part_size = 600000000
+
 # these items should be configured by the user
 # but put in some defaults for testing
-default_config = stub_class()
+default_config = config_class()
 
 test_dir = "/home/tbird/work/dropsync/test/"
 default_config.source_dir = test_dir+"source_dir"
@@ -93,10 +102,7 @@ default_config.sync_dir = test_dir+"sync_dir"
 # Transfer limits should match any restrictions on
 # your synchronization directory
 default_config.transfer_size_limit = 1000000000
-default_config.part_size = 600000000
 default_config.transfer_count_limit = 1000
-default_config.exclude_list = ""
-default_config.exclude_re_list = []
 
 # here are some routines for logging and printing
 logf = None
@@ -186,7 +192,7 @@ def read_config_file(config_path):
 		"exclude_list":'s',	# list of regex patterns to exclude from transfer
 		"part_size":'d',	# size of file parts
 	}	
-	config = stub_class()
+	config = config_class()
 	in_block = 0
 	block = ""
 	line_no = 0
