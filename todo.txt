@@ -1,23 +1,10 @@
 Todo file for dropsync:
 
 == 1.0 features ==
-2 - support partitioning files (for files larger than size limit)
-   - on sender: when making transfer file:
-     - don't make transfer file for a file if it is larger than part_size
-   - on receiver: while processing transfer files,
-     - make a .partyyofxx file for the last part copied
-       - remove other .partyyofxx files
-   - on receiver: when making dest_index
-     - if a .partyyofxx file exists, then force a re-caculate_sha1 for the file
-       (that is, don't use any cached value)
-
-1 - automatically run the sender and receiver
-   1 - add lock file?
-   - use sequence number to determine if update in other index has occurred
-     - when updating my_index,
-       - set my_index sequence to be other_index sequence+1
-         - create function get_sequence(index)
-     - if other_index > my_index, run
+ - automatically run the sender and receiver
+   - add lock file? - no - use sequence at beginning and end of index
+     - lock on dest_index only (receiver never looks at source_index)
+   - use sequence number to determine if update in dest_index has occurred
    - don't run unless transfer files have been synched to destination
      - detect transfer complete (how?)
        - make a transfer list? (only receiver would check it, and it's not
@@ -25,13 +12,6 @@ Todo file for dropsync:
          - would have list of all expected transfer files
          - receiver can postpone running if transfer files haven't shown up yet
 	    - should check frequently and see if anything is changing in sync_dir
-
- - fix bugs found:
-   - IMG_7449.JPG is not synch-ing.  It was transfered several times, and
-     processed by the receiver multiple times.  Why?
-   - need to lock each side, to keep from processing partially written transfer
-     or index files
-     - create a file lock - if present, hold off
 
 == other features ==
  - support USB-stick mode:
