@@ -13,12 +13,12 @@
 # see bottom of file for data and algorithm information
 #
 # To do:
-#  - truncate file when writing last part
 #  - write correct sequence number in index file (other_index sequence + 1)
 #  - on sender wakeup, detect dest-index change
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 0.9.4 - fix write to last_offset, and ignore file limits on removes
 # 0.9.3 - numerous fixes for part files: generate part file at destination,
 #  and used it to trigger recalculating the sha1 of the base file,
 #  truncate files in case they have shrunk
@@ -52,7 +52,7 @@ import re
 # version information
 major_version = 0
 minor_version = 9
-revision = 3
+revision = 4
 
 debug = 0
 verbose = 0
@@ -1044,8 +1044,7 @@ def walk_tree_for_removes(entry, other_tree):
 
 	# if item is not present in other tree, remove it
 	if other == None:
-		if within_transfer_limit(entry):
-			make_transfer_file(entry, "remove")
+		make_transfer_file(entry, "remove")
 
 	if entry.is_dir():
 		dprint("%s is a dir, walking children" % entry.path)
