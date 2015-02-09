@@ -2,10 +2,7 @@ Todo file for dropsync:
 
 == 1.0 features ==
  - automatically run the sender and receiver
-   - add lock file? - no - use sequence at beginning and end of index
-     - lock on dest_index only (receiver never looks at source_index)
-   - use sequence number to determine if update in dest_index has occurred
-   - don't run unless transfer files have been synched to destination
+   - don't run receiver until transfer files have been synched to destination
      - detect transfer complete (how?)
        - make a transfer list? (only receiver would check it, and it's not
           running)

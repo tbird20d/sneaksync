@@ -18,6 +18,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 0.9.5 - in period mode, check for activity from other side before looping
 # 0.9.4 - fix write to last_offset, and ignore file limits on removes
 # 0.9.3 - numerous fixes for part files: generate part file at destination,
 #  and used it to trigger recalculating the sha1 of the base file,
@@ -52,7 +53,7 @@ import re
 # version information
 major_version = 0
 minor_version = 9
-revision = 4
+revision = 5
 
 debug = 0
 verbose = 0
@@ -780,7 +781,7 @@ def write_index(filename, index):
 	write_tree(f, index.root)
 	f.close()
 		
-def generate_index(filename, dir_to_be_indexed):
+def generate_index(seq, filename, dir_to_be_indexed):
 	global index_cache_recalc_list
 
 	# scan directory, generating index lines
@@ -800,11 +801,19 @@ def generate_index(filename, dir_to_be_indexed):
 
 	index_cache_recalc_list = []
 
-	# use starting sequence of 0000...01
-	index = index_class(1, entry)
+	# use specified sequence
+	index = index_class(seq, entry)
 
 	write_index(filename, index)
 
+# returns sequence of index file
+def read_index_seq(filename):
+	f = open(filename, "r")
+
+	seq_line = f.readline()
+	sequence = int(seq_line)
+	f.close()
+	return sequence
 
 # returns an index object for the root of the tree
 def read_index(filename, base_path):
@@ -853,12 +862,15 @@ def update_index(index_path, dir_to_be_indexed):
 	# if file doesn't exist, create it
 	if not os.path.isfile(index_path):
 		index_cache = None
+		seq = 0
 	else:
 		# read the old index to use as a sha1 cache
 		prev_index = read_index(index_path, dir_to_be_indexed)
 		index_cache = prev_index.root
+		seq = prev_index.sequence
 
-	generate_index(new_index_path, dir_to_be_indexed)
+	# new version of index should have next sequence num
+	generate_index(seq+1, new_index_path, dir_to_be_indexed)
 	index_cache = None
 
 	try:
@@ -1332,15 +1344,18 @@ def main():
 		index_cache = None
 		if mode=="send":
 			vprint("Generating source index...")
-			generate_index(config.source_index, config.source_dir)
+			generate_index(1, config.source_index,
+				config.source_dir)
 		else:
 			vprint("Generating destination index...")
-			generate_index(config.dest_index, config.dest_dir)
+			generate_index(1, config.dest_index,
+				config.dest_dir)
 
 		sys.exit(0)
 		
 	while True:
 		if mode == "send":
+			dest_seq = read_index_seq(config.dest_index)
 			do_send()
 			aprint("Created %d transfer files." % transfer_count)
 			if transfer_skip_count:
@@ -1349,10 +1364,10 @@ def main():
 			do_receive()
 			aprint("Processed %d transfer files." % transfer_count)
 
+		close_log()
+
 		if not period:
 			break
-
-		close_log()
 
 		# re-initialize global variables and configs
 		try:
@@ -1365,10 +1380,27 @@ def main():
 		transfer_skip_count = 0
 		index_cache = None
 
-		# while other_index sequence <= my_index sequence:
 		# wait for next wakeup
-		vprint("Waiting for %d minutes..." % period)
-		time.sleep(period*60)
+		keep_waiting = True
+		while keep_waiting:
+			vprint("Waiting for %d minutes..." % period)
+			time.sleep(period*60)
+
+			# poll for activity on other side
+			# if a sender, check for dest_index sequence change
+			# if a receiver, check for transfer files
+			if mode == "send":
+				vprint("Checking dest index sequence")
+				new_dest_seq = read_index_seq(config.dest_index)
+				if new_dest_seq != dest_seq:
+					keep_wating = False
+			else:
+				vprint("Checking for transfer files")
+				if get_transfer_file_list(): 
+					keep_waiting = False 
+					# FIXTHIS - should wait for transfer
+					# files to finish syncing (but how??)
+				del(config.transfer_file_list)
 
 		# restart logging
 		open_log(log_file, mode, do_gen_index)
