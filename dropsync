@@ -720,6 +720,7 @@ def process_path(cur_path, base_path):
 		pat = ".*[.]part[0-9][0-9]of[0-9][0-9]$"
 		if re.match(pat, full_path):
 			# remove this file
+			# comment this out to keep file for debugging parts
 			os.remove(full_path)
 			# force a recalc on it's base file
 			index_cache_recalc_list.append(full_path[:-11])
@@ -1167,7 +1168,7 @@ def process_transfer_file(filename):
 			amount_to_read = min(32768, entry.end_offset - offset)
 			dprint("reading %d bytes" % amount_to_read)
 			buf = tf.read(amount_to_read)
-			dprint("writing %d bytes ('%s') at offset %d" % (len(buf), buf, offset))
+			dprint("writing %d bytes ('%s') at offset %d" % (len(buf), "buf", offset))
 			outfile.write(buf)
 			offset += len(buf)
 			dprint("after write, my offset is %d" % offset)
@@ -1180,8 +1181,8 @@ def process_transfer_file(filename):
 			dprint("entry.is_part=True")
 			if not entry.is_last_part:
 				dprint("writing byte at last_offset %d" % \
-					(entry.last_offset-1))
-				outfile.seek(entry.last_offset-1)
+					(entry.last_offset))
+				outfile.seek(entry.last_offset)
 				outfile.write('$')
 
 			outfile.close()
