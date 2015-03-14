@@ -57,8 +57,6 @@ revision = 5
 
 debug = 0
 verbose = 0
-transfer_count = 0
-transfer_skip_count = 0
 
 # used to speed up index generation
 # has the previous index tree, if index file is present
@@ -91,6 +89,16 @@ class config_class:
 		# default part_size to 600M
 		self.part_size = 600000000
 
+class data_class:
+	def __init__(self):
+		self.transfer_count = 0
+		self.transfer_skip_count = 0
+		self.transfer_file_total_size = 0
+		self.transfer_file_list_scanned = False
+		self.transfer_file_list = []
+		# -1 means it hasn't been calculated yet
+		self.max_transfer_num = -1
+
 # these items should be configured by the user
 # but put in some defaults for testing
 default_config = config_class()
@@ -120,7 +128,7 @@ def open_log(log_path, mode, gen_index):
 
 	atexit.register(close_log)
 
-def write_config_to_log(config):
+def write_config_header_to_log(config):
 	write_log("config:")
 	write_log("  source_dir=%s" % config.source_dir)
 	write_log("  dest_dir=%s" % config.dest_dir)
@@ -888,13 +896,11 @@ def update_index(index_path, dir_to_be_indexed):
 	
 
 def get_transfer_file_list():
+	global data
 	global config
 
-	# get the transfer file info from config.
-	# if not found, we haven't scanned for it.  Do that now.
-	try:
-		tfiles = config.transfer_file_list
-	except:
+	# if we haven't scanned for the transfer files, do that now.
+	if not data.transfer_file_list_scanned:
 		# scan sync_dir looking for transfer files
 		file_list = os.listdir(config.sync_dir)
 
@@ -902,66 +908,60 @@ def get_transfer_file_list():
 		for filename in file_list:
 			if filename.startswith(config.transfer_prefix):
 				tfiles.append(config.sync_dir+os.path.sep+filename)
-		config.transfer_file_list = tfiles
+		data.transfer_file_list = tfiles
+		data.transfer_file_list_scanned = True
 
-	dprint("transfer files=%s" % tfiles)
-	return tfiles
-
-def scan_for_max_transfer_num():
-	tfiles = get_transfer_file_list()
-
-	# get largest number used so far
-	max_num = 0
-	for filename in tfiles:
-		try:
-			end_num = int(filename[-5:])
-			if end_num > max_num:
-				max_num = end_num
-		except:
-			pass
-
-	return max_num
+	dprint("transfer files=%s" % data.transfer_file_list)
+	return data.transfer_file_list
 
 def get_next_transfer_filename():
+	global data
 	global config
 
-	# get the max transfer number from config.
-	# if not found, we haven't scanned for it.  Do that now.
-	try:
-		max_num = config.max_transfer_num
-	except:
-		max_num = scan_for_max_transfer_num()
+	# if we haven't scanned for max_transfer_num, do that now.
+	if data.max_transfer_num == -1:
+		tfiles = get_transfer_file_list()
 
-	max_num += 1
-	config.max_transfer_num = max_num
-	filename = config.transfer_format % max_num
+		# get largest number used so far
+		max_num = 0
+		for filename in tfiles:
+			try:
+				end_num = int(filename[-5:])
+				if end_num > max_num:
+					max_num = end_num
+			except:
+				pass
+		data.max_transfer_num = max_num
+
+	data.max_transfer_num += 1
+	filename = config.transfer_format % data.max_transfer_num
 	dprint("next transfer filename='%s'" % filename)
 	return filename
-		
 
 # transfer_type must be one of: "remove" or "update"
 def make_transfer_file(entry, transfer_type):
-	global transfer_count
+	global data
 
 	filename = get_next_transfer_filename()
 	vprint("Creating transfer file '%s' for file '%s'" % \
 		(filename, entry.path))
 
 	outfile = open(filename, "w")
-	config.transfer_file_list.append(filename)
+	data.transfer_file_list.append(filename)
 
-	if transfer_type == "update":
-		outfile.write(entry.to_line()+"\n")
-	else:
+	if transfer_type == "remove":
 		# this is a "remove" transfer
 		saved_sha1 = entry.sha1
 		entry.sha1 = "<deleted>"
 		outfile.write(entry.to_line()+"\n")
 		entry.sha1 = saved_sha1
 		outfile.close()
-		config.transfer_file_total_size += os.path.getsize(filename)
-		transfer_count += 1
+		data.transfer_count += 1
+		data.transfer_file_total_size += os.path.getsize(filename)
 		return
+
+	# must be an "update" transfer
+	outfile.write(entry.to_line()+"\n")
 
 	if not entry.is_dir():
 		# put file content after entry line
@@ -980,23 +980,24 @@ def make_transfer_file(entry, transfer_type):
 		infile.close()
 
 	outfile.close()
-	transfer_count += 1
-	config.transfer_file_total_size += os.path.getsize(filename)
+	data.transfer_count += 1
+	data.transfer_file_total_size += os.path.getsize(filename)
 
 def get_current_transfer_size():
-	try:
-		total_size = config.transfer_file_total_size
-	except:
+	global data
+
+	if not data.transfer_file_list_scanned:
 		# scan list of transfer files, and sum their sizes
 		tfiles = get_transfer_file_list()
 
 		total_size = 0
 		for filename in tfiles:
 			total_size += os.path.getsize(filename)
-		config.transfer_file_total_size = total_size
+		data.transfer_file_total_size = total_size
 
-	dprint("current total transfer size=%d" % total_size)
-	return total_size
+	dprint("current total transfer size=%d" % \
+		data.transfer_file_total_size)
+	return data.transfer_file_total_size
 
 def get_current_transfer_count():
 	# count the list of transfer files
@@ -1009,24 +1010,24 @@ def get_current_transfer_count():
 
 def within_transfer_limit(entry):
 	global config
-	global transfer_skip_count
+	global data
 
 	# check count and size limits for transfer directory
 	if get_current_transfer_count() >= config.transfer_count_limit:
 		vprint("transfer count limit reached, not sending '%s' this time" % \
 			entry.path)
-		transfer_skip_count += 1
+		data.transfer_skip_count += 1
 		return False
 	elif get_current_transfer_size() + entry.size >= \
 		config.transfer_size_limit:
 		vprint("transfer size limit reached, not sending '%s' this time" % \
 			entry.path)
-		transfer_skip_count += 1
+		data.transfer_skip_count += 1
 		return False
 	elif entry.size > config.part_size:
 		vprint("file size greater than part limit, not sending '%s'" % \
 			entry.path)
-		# NOTE: this doesn't count in our skip_count
+		# NOTE: don't count this in our skip_count
 		return False
 	else:
 		return True
@@ -1101,7 +1102,7 @@ def do_send():
 	walk_tree_for_removes(di.root, si.root)
 
 def process_transfer_file(filename):
-	global transfer_count
+	global data
 
 	# read transfer file and act on it
 	tf = open(filename, "rb")
@@ -1118,7 +1119,7 @@ def process_transfer_file(filename):
 			tf.close()
 			dprint("Removing transfer file")
 			os.remove(filename)
-			transfer_count += 1
+			data.transfer_count += 1
 			return
 
 	# NOTE - transfer file is still open at this point
@@ -1141,7 +1142,7 @@ def process_transfer_file(filename):
 			dprint("os.remove('%s')" % entry.path)
 		dprint("Removing transfer file")
 		os.remove(filename)
-		transfer_count += 1
+		data.transfer_count += 1
 		return
 
 	# not a remove, make something
@@ -1165,10 +1166,11 @@ def process_transfer_file(filename):
 		if not os.path.exists(entry.full_path()):
 			open(entry.full_path(), "wb").close()
 
-		# copy the file contents, from remainder of transfer file
+		# copy the file contents from remainder of transfer file
 		dprint("writing to file %s" % entry.full_path())
 		# NOTE - don't mess with this open mode unless you know
-		# exactly what you're doing...
+		# exactly what you're doing...  Other modes truncate the file
+		# or don't open newly created files.
 		outfile = open(entry.full_path(), "r+b")
 		offset = entry.start_offset
 		dprint("seeking to offset %d" % offset)
@@ -1210,7 +1212,7 @@ def process_transfer_file(filename):
 
 		outfile.close()
 
-		# if file is too big (e.g. it was shortened on source),
+		# if dest file is too big (e.g. it was shortened on source),
 		# truncate it
 		if os.path.getsize(entry.full_path()) > entry.last_offset:
 			outfile = open(entry.full_path(), "r+b")
@@ -1227,7 +1229,7 @@ def process_transfer_file(filename):
 	dprint("Removing transfer file")
 	os.remove(filename)
 
-	transfer_count += 1
+	data.transfer_count += 1
 
 def do_receive():
 	global config
@@ -1250,10 +1252,9 @@ def main():
 	global verbose
 	global default_config
 	global config
+	global data
 	global log_file
 	global index_cache
-	global transfer_count
-	global transfer_skip_count
 
 	mode = "send"
 	do_gen_index = False
@@ -1333,7 +1334,10 @@ def main():
 	config = get_config(default_config, config_path, re_list)
 	validate_config(config, mode)
 
-	write_config_to_log(config)
+	write_config_header_to_log(config)
+
+	# initialize global data (stats, counters, and transfer list)
+	data = data_class()
 
 	if do_gen_index:
 		# remove transfer files
@@ -1354,30 +1358,24 @@ def main():
 		sys.exit(0)
 		
 	while True:
+		# now actually do the send or receive
 		if mode == "send":
 			dest_seq = read_index_seq(config.dest_index)
 			do_send()
-			aprint("Created %d transfer files." % transfer_count)
-			if transfer_skip_count:
-				aprint("Skipped %d items that still need to be transferred." % transfer_skip_count)
+			aprint("Created %d transfer files." % data.transfer_count)
+			if data.transfer_skip_count:
+				aprint("Skipped %d items that still need to be transferred." % data.transfer_skip_count)
 		else:
 			do_receive()
-			aprint("Processed %d transfer files." % transfer_count)
+			aprint("Processed %d transfer files." % data.transfer_count)
 
 		close_log()
 
 		if not period:
 			break
 
-		# re-initialize global variables and configs
-		try:
-			del(config.transfer_file_list)
-			del(config.transfer_file_total_size)
-			del(config.max_transfer_num)
-		except:
-			pass
-		transfer_count = 0
-		transfer_skip_count = 0
+		# re-initialize global data for next run
+		data = data_class()
 		index_cache = None
 
 		# wait for next wakeup
@@ -1400,7 +1398,9 @@ def main():
 					keep_waiting = False 
 					# FIXTHIS - should wait for transfer
 					# files to finish syncing (but how??)
-				del(config.transfer_file_list)
+				else:
+					# nothing found, rebuild list next time
+					data.transfer_file_list_scanned = False
 
 		# restart logging
 		open_log(log_file, mode, do_gen_index)
