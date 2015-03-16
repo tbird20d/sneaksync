@@ -18,10 +18,12 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 0.9.7 - change recalc_list handling, add parents to index tree
+# 0.9.6 - refactor global data items into a class
 # 0.9.5 - in period mode, check for activity from other side before looping
 # 0.9.4 - fix write to last_offset, and ignore file limits on removes
 # 0.9.3 - numerous fixes for part files: generate part file at destination,
-#  and used it to trigger recalculating the sha1 of the base file,
+#  and use it to trigger recalculating the sha1 of the base file,
 #  truncate files in case they have shrunk
 # 0.9.2 - don't send files bigger than part_size (only their parts)
 # 0.9.1 - fix bug with config missing an exclude_list
@@ -35,7 +37,7 @@
 # 	  the size is different even when the dir contents are identical
 #	  (which resulted in never-converging dir entries)
 # 0.7.0 - do faster indexing: use previous index as a sha1 cache.
-#         Also, do rename on index file creation, and avoid re-reading
+#         Also, use os.rename for index file creation, and avoid re-reading
 # 	  the transfer_file_list execessively during sends
 # 0.6.1 - add ending time to log
 # 0.6.0 - add support for logging
@@ -53,7 +55,7 @@ import re
 # version information
 major_version = 0
 minor_version = 9
-revision = 5
+revision = 7
 
 debug = 0
 verbose = 0
@@ -61,7 +63,6 @@ verbose = 0
 # used to speed up index generation
 # has the previous index tree, if index file is present
 index_cache = None
-index_cache_recalc_list = []
 
 def usage():
 	prog_name = os.path.basename(sys.argv[0])
@@ -98,6 +99,7 @@ class data_class:
 		self.transfer_file_list = []
 		# -1 means it hasn't been calculated yet
 		self.max_transfer_num = -1
+		self.recalc_list = []
 
 # these items should be configured by the user
 # but put in some defaults for testing
@@ -383,6 +385,8 @@ class file_entry:
 		self.perms = perms
 		self.sha1 = "<none>"
 		self.base_path = base_path
+		self.sub_entries = []
+		self.parent = None
 	
 		# technically true, but use this since this is not a part
 		self.is_last_part = False
@@ -467,12 +471,6 @@ class file_entry:
 	def is_dir(self):
 		return False
 
-	def lookup_by_path(self, path):
-		if self.path == path:
-			return self
-		else:
-			return None
-
 	def attr_match(self, entry):
 		dprint("self.sha1=%s" % self.sha1)
 		dprint("entry.sha1=%s" % entry.sha1)
@@ -494,22 +492,32 @@ class file_entry:
 	def __repr__(self):
 		return "entry %s" % os.path.basename(self.path)
 
-
-class dir_entry(file_entry):
-	def __init__(self, path, size, date, perms, base_path):
-		# path is stored in filesystem (unescaped) format
-		# path is relative to the base_path (not an absolute path)
-		file_entry.__init__(self, path, size, date, perms, base_path)
-		self.sub_entries = []
-
 	def add_sub_entry(self, entry):
 		self.sub_entries.append(entry)
+		entry.parent = self
 
 	def sort_sub_entries(self):
 		entry_list = sorted(self.sub_entries,
 			key = lambda entry: entry.path)
 		self.sub_entries = entry_list
 
+	def lookup_by_path(self, path):
+		dprint("in lookup_by_path()")
+		dprint("self=%s" % self)
+		dprint("path=%s" % path)
+		if self.path == path:
+			return self
+		else:
+			found = None
+			for child in self.sub_entries:
+				if path.startswith(child.path):
+					found = child.lookup_by_path(path)
+					if found:
+						break
+			return found
+
+
+class dir_entry(file_entry):
 	def calculate_sha1(self):
 		# sha1 for a directory is the digest of sub-entry strings
 		# sorted by path
@@ -528,21 +536,6 @@ class dir_entry(file_entry):
 	def is_dir(self):
 		return True
 
-	def lookup_by_path(self, path):
-		dprint("in (dir_entry).lookup_by_path()")
-		dprint("self=%s" % self)
-		dprint("self.sub_entries=%s" % self.sub_entries)
-		dprint("path=%s" % path)
-		if self.path == path:
-			return self
-		else:
-			found = None
-			for child in self.sub_entries:
-				if path.startswith(child.path):
-					found = child.lookup_by_path(path)
-					if found:
-						break
-			return found
 
 # path for file ends in ".partyyofxx"
 # e.g.  testfile.part02of13
@@ -710,7 +703,7 @@ def create_part_entries(fentry, base_path):
 # returns a list containing: 1) a single file, 2) a single directory, or
 #    3) a file and multiple part entries
 def process_path(cur_path, base_path):
-	global index_cache_recalc_list
+	global data
 
 	dprint("Processing path '%s'" % cur_path)
 	full_path = os.path.abspath(cur_path)
@@ -725,15 +718,20 @@ def process_path(cur_path, base_path):
 	if os.path.isfile(full_path):
 		# if file is a part, put it on a special list
 		# This is used later to force a re-caculation of
-		# the sha1 for the base file
+		# the sha1 for the base file (and its parts)
 		pat = ".*[.]part[0-9][0-9]of[0-9][0-9]$"
 		if re.match(pat, full_path):
 			# remove this file
 			# comment this out to keep file for debugging parts
 			os.remove(full_path)
 			# force a recalc on it's base file
-			index_cache_recalc_list.append(full_path[:-11])
-			# and don't put this file in the index
+			if not full_path.startswith(base_path):
+				aprint("Error: can't truncate full_path %s safely\n" % full_path)
+
+			rel_path = full_path[len(base_path)+1:-11]
+			dprint("Adding %s to recalc_list" % rel_path)
+			data.recalc_list.append(rel_path)
+			# and don't put this (the part) in the index
 			return None
 		else:
 			entry = create_file_entry(full_path, base_path)
@@ -788,9 +786,60 @@ def write_index(filename, index):
 	# now write the tree
 	write_tree(f, index.root)
 	f.close()
+
+# recalculate items in the index tree, based on the recalc_list
+# during processing, some items may have picked up wrong sha1 values
+# from the index cache.  This routine corrects those items in the index
+# so it doesn't get written out with bad data.
+
+# this routine can either just invalidate the sha1 (used on an index_cache),
+# or do a real sha1 re-calculation (used on the real index)
+
+def process_recalc_list(entry, do_recalc):
+	global data
+	global index_cache
+
+	# don't use the cache for any recalculations done
+	saved_cache = index_cache
+	index_cache = None
+
+	dprint("Checking for items that need sha1 recalculation...")
+	dprint("recalc_list=%s" % data.recalc_list)
+	for recalc_path in data.recalc_list:
+		dprint("found path %s on recalc_list" % recalc_path)
+		recalc_entry = entry.lookup_by_path(recalc_path)
+		dprint("looking up entry for recalc - got %s" % recalc_entry)
+		if recalc_entry:
+			dprint("recalculating sha1 for %s" % recalc_entry.path)
+			if do_recalc:
+				recalc_entry.calculate_sha1()
+			else:
+				recalc_entry.sha1 = "<none>"
+
+			# recalc on parts of a file as well
+			if not recalc_entry.is_dir():
+				for child in recalc_entry.sub_entries:
+					if do_recalc:
+						recalc_entry.calculate_sha1()
+					else:
+						recalc_entry.sha1 = "<none>"
+
+			# recalculate my parents up the tree
+			# note: some nodes may be recalculated multiple times
+			p = recalc_entry.parent
+			while p:
+				if do_recalc:
+					p.calculate_sha1()
+				else:
+					p.sha1 = "<none>"
+				p = p.parent
+
+	data.recalc_list = []
+	index_cache = saved_cache
+
 		
 def generate_index(seq, filename, dir_to_be_indexed):
-	global index_cache_recalc_list
+	global index_cache
 
 	# scan directory, generating index lines
 	entry_list = process_path(dir_to_be_indexed, dir_to_be_indexed)
@@ -800,14 +849,8 @@ def generate_index(seq, filename, dir_to_be_indexed):
 		aprint("ERROR: unexpected result from process_path")
 	entry = entry_list[0]
 
-	# do special handling for items on the purge list
-	index_cache = None
-	for recalc_path in index_cache_recalc_list:
-		recalc_entry = entry.lookup_by_path(recalc_path)
-		if recalc_entry:
-			recalc_entry.calculate_sha1()
-
-	index_cache_recalc_list = []
+	# recalculate sha1s for any entries that may need it
+	process_recalc_list(entry, True)
 
 	# use specified sequence
 	index = index_class(seq, entry)
@@ -844,6 +887,17 @@ def read_index(filename, base_path):
 			root = entry
 			continue
 
+		# if I'm a part, put me on my file's child list
+		if entry.is_part:
+			base_entry = root.lookup_by_path(entry.real_path)
+			if not base_entry:
+				aprint("Error: file entry for part is missing.")
+				aprint("entry.path=%s" % entry.path)
+				continue
+
+			base_entry.add_sub_entry(entry)
+			continue
+
 		# manage dir_stack
 		# pop items that are not my parent directories
 		while not entry.path.startswith(dir_stack[-1].path):
@@ -853,7 +907,7 @@ def read_index(filename, base_path):
 		if entry.path.startswith(dir_stack[-1].path):
 			dir_stack[-1].add_sub_entry(entry)
 		else:
-			aprint("What happened?, parent dir should be on dir_stack")
+			aprint("Error: parent dir missing from dir_stack")
 			aprint("entry.path=%s" % entry.path)
 			aprint("dir_stack[-1].path=%s" % dir_stack[-1].path)
 
@@ -876,6 +930,10 @@ def update_index(index_path, dir_to_be_indexed):
 		prev_index = read_index(index_path, dir_to_be_indexed)
 		index_cache = prev_index.root
 		seq = prev_index.sequence
+
+
+	# remove sha1s for anything on the recalc_list
+	process_recalc_list(index_cache, False)
 
 	# new version of index should have next sequence num
 	generate_index(seq+1, new_index_path, dir_to_be_indexed)
@@ -1145,7 +1203,11 @@ def process_transfer_file(filename):
 		data.transfer_count += 1
 		return
 
-	# not a remove, make something
+	# not a remove...
+	# don't let old sha1 get used
+	data.recalc_list.append(entry.path)
+
+	# Now, let's make something
 	if entry.is_dir():
 		# make directory, if not already present
 		vprint("Creating directory")

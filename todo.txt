@@ -1,5 +1,31 @@
 Todo file for dropsync:
 
+ - fix problem with violation of transfer_size_limit 
+ - lookup_by_path on a part fails, because files don't lookup in sub_entries
+
+ - fix problem with not sync-ing parts
+      (was a problem with sha1 caching)
+   + add to recalc list during process_transfer
+1   + recalc parts when a base file is recalc-ed
+   + NEED to recalc parent dirs when a file recalc is done!!
+   + recalc child parts when a file recalc is done
+   - test fix
+     - make sure recalc list is being populated and processed correctly
+
+ - detect that root sha1 did not chang after a receive (that processed
+   transfer files), and do a full re-index without a cache
+   - this is expensive, but is a last resort if something weird happens
+   - get root sha1 from previous dest_index, compare to root sha1
+   - just delete dest_index file and do update_index()
+
+
+ - sanitize all paths
+   - verify that all paths are INSIDE the destination directory
+     - reject with extreme WARNING any that are not
+     - check that os.path.realpath(item).startswith(os.path.realpath(destdir))
+
+ - change is_dir() function to is_dir attribute
+
 == 1.0 features ==
  - automatically run the sender and receiver
    - don't run receiver until transfer files have been synched to destination
@@ -28,6 +54,8 @@ Todo file for dropsync:
      entry size
 
 == nice-to-have ==
+ - read and write updates to index files directly in file instead of in memory
+   - allows for arbitrarily large indexes
  - make standalone Windows executable - use py2exe
  - have an option for just comparing source and destination index, to
    report the current size of the difference between the two (how much is
@@ -64,4 +92,8 @@ Todo file for dropsync:
 
 == long-term ideas ==
  - support sending transfer files by e-mail
+ - support initiating transfers when phone connects to specific networks
+   - e.g. when connected to source network, run sender, and when connected
+	to dest network, run receiver, automatically (phone is intermediary)
+   - may need to get permission to launch actions on host
  - send deltas instead of full files (lots of work!, but would save bandwidth)
