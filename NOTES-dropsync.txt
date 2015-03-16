@@ -17,47 +17,67 @@ the destination machine has:
 
 === index file ===
 The index file has the format:
-sequence sha1
-entries
+<sequence> <sha1>
+<entries>
 
 Sequence is a monotonically increasing number, occupying a fixed space
 of 50 decimal digits (with leading 0s), indicating the version of the file.
 sha1 is the digest of all entry lines in the file
 
 Each index entry is one line with the format 
-  type, path, size, date, perms, sha1
+
+<type>, <path>, <size>, <date>, <perms>, <sha1>
+
 The index file is sorted for faster searches.
 Directory contents are listed alphabetically, following the directory
 entry for that group.
 
-The type is either "f" or "d" (for file or directory, respectively)
+The type is either "f" or "d" or "p" (for file, directory or part)
+A part is a portion of a file.
+
+The path is relative to the root of the directory being synchronized.
+
+For a part, the path ends in a suffix indicating what part of the
+file this entry represents.  The suffix is in the form .partyyofxx,
+where yy is the part number, and xx is the total number of parts
+needed to represent the file.  The part numbers start at 1.
+Each part begins at offset part_size * (yy-1) and extend either to
+the beginning of the next part or the end of the file.
 
 To avoid commas in the path portion of the directy entry, the path
 is escaped as follows:
  % are converted to %25
  , are convereted %2C
 
+size is a decimal number.  For parts, for all but the last part of the
+file, the size should always be equal to the part_size specified in
+the configuration file.
+the same as the configured max
 date is of format: 2014-12-31_12:59:59
-perms are unix perms in string format (e.g. 'rwxrwxrwx'
+perms are unix perms in string format (e.g. 'rwxrwxrwx')
 
 For a file, the sha1 is the digest of the content of the file.
+For a part, the sha1 is the digest of the content of that part of the file.
 For a directory, the sha1 is the digest of the entries for all files and
 sub-directories of a directory (with the entries sorted in alphabetical order)
 
 === transfer file ===
 A transfer file has the following data:
 
-index entry
+<index entry>
 content
 
-If the transfer file indicates a removal, the sha1 has the text "<deleted>"
-and the content is empty
+The index entry is the same format as the entries in the index file.
+If the transfer file indicates a removal, the sha1 in the entry
+has the text "<deleted>" and the content is empty
 
 == sender algorithm ==
 each time run, do:
+
 update source_index
   if source_index is not present, generate it
   else scan source_dir, and update source_index
+
 transfer files that need updating on destination
   compare source_index with dest_index
     for each entry in source_index:
@@ -67,21 +87,52 @@ transfer files that need updating on destination
     for each entry in dest_index:
       if entry is missing in source_index
         create deletion transfer file in d1
+
 watch for more updates
   watch dest_index for change 
-loop until there are no more files to transfer
+  loop until there are no more files to transfer
 
 == receiver algorithm ==
 each time run, do:
-update dest_index
-  if dest_index is not present, generate it
-  else scan dest_dir, and update dest_index
+
 receive transfer files
   if there's a transfer file,
     [check if a file in dest_dir matches or not] (optional optimization)
-    copy transfer file to dest_dir
-    update dest_index with entry for newly copied file
-      get sha1, rewrite dest_index
+    for a file:
+	copy transfer file to dest_dir
+    for a part:
+	copy content from transfer file to correct offset in target file in
+		dest_dir
+    update dest_index with entry for newly copied file or part
+        get sha1, rewrite entry in dest_index
+    if part, copy part contents to part file, to cause index to update
     loop until no more files to transfer
 
+write updated dest_index from modified data
+     if dest_index is not present, create it
+     else
+        read dest_index
+        scan dest_dir and update dest_index
+           if path, size and time and date match, don't re-generate sha1
+           if part files are found, update sha1 in dest_index
 
+== notes on recalculating the dest_index
+We use the previous index as a cache to speed up the creation
+of the new index.  But the dest_index
+is out-of-date for any entries we just created or modified.
+
+(Also, the source_index could be out-of-date under rare circumstances
+e.g. if the file content changed, but the time, date and size did not.
+Handle this issue separately.)
+
+During processing transfer files, we add all files modified to the
+recalc_list.  This list is used to invalidate any sha1 entries
+in the index_cache, prior to rebuilding the new dest_index.
+
+Also, while processing the dest directory when generating the
+new dest_index, any part files present in the filesystem are
+have their base file names added to the recalc_list.  This list
+is used to recalculate sha1s prior to writing out the new dest_index. 
+
+FIXTHIS - We SHOULD also detect if we have processed transfer files but
+the index has not changed, and do a full re-index. (not using a cache)
