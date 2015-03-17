@@ -18,6 +18,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 0.9.9 - show activity on long operations (index creation)
 # 0.9.8 - refactor classes, fix resulting bugs in part file transfers
 # 0.9.7 - change recalc_list handling, add parents to index tree
 # 0.9.6 - refactor global data items into a class
@@ -56,7 +57,7 @@ import re
 # version information
 major_version = 0
 minor_version = 9
-revision = 8
+revision = 9
 
 debug = 0
 verbose = 0
@@ -80,6 +81,7 @@ def usage():
   --version  show version information, and exit
   -p <period> run the program in a loop, and poll for changes every
 	      <period> minutes
+  -a         show activity status while running
   -x <pat>   exclude directory or file matching the indicated re pattern
              This option may be specified multiple times
 """ % (prog_name, prog_name)
@@ -712,6 +714,9 @@ def create_part_entries(fentry, base_path):
 def process_path(cur_path, base_path):
 	global data
 
+
+	show_activity()
+
 	dprint("Processing path '%s'" % cur_path)
 	full_path = os.path.abspath(cur_path)
 
@@ -938,13 +943,16 @@ def update_index(index_path, dir_to_be_indexed):
 		index_cache = prev_index.root
 		seq = prev_index.sequence
 
-
 	# remove sha1s for anything on the recalc_list
 	process_recalc_list(index_cache, False)
+
+	show_activity()
 
 	# new version of index should have next sequence num
 	generate_index(seq+1, new_index_path, dir_to_be_indexed)
 	index_cache = None
+
+	end_activity()
 
 	try:
 		os.rename(new_index_path, index_path)
@@ -1159,7 +1167,7 @@ def do_send():
 #	for filename in tfiles:
 #		os.remove(filename)
 
-	vprint("Updating source index")
+	start_activity("Updating source index")
 	update_index(config.source_index, config.source_dir)
 
 	# read the source and destination indexes
@@ -1327,8 +1335,75 @@ def do_receive():
 		process_transfer_file(filename)
 
 	# update destination index
-	vprint("Updating dest_index file")
+	start_activity("Updating dest_index file")
 	update_index(config.dest_index, config.dest_dir)
+
+ESC = '\x1B'
+class tty_data_class:
+	def __init__(self):
+		self.show_activity = False
+		self.backspace = '\x08'
+		self.erase_end_of_line = ESC+'[K'
+		self.erase_cur_line = ESC+'[2K'
+		self.erase_screen = ESC+'[2J'
+		self.beginning_of_line = ESC+'[0G'
+		self.rotate_char_list = ['|','/','-','\\']
+		self.rotate_index = 0
+		self.msg_string = "activity: %s"
+	
+	def put_msg_and_char(self, rchar):
+		# FIXTHIS - could put activity spinner at specific location
+		# on screen (saved in start_activity?)
+		sys.stdout.write(self.beginning_of_line)
+		sys.stdout.flush()
+	#	sys.stdout.write(self.erase_cur_line)
+	#	sys.stdout.flush()
+	#	sys.stdout.write(self.beginning_of_line)
+	#	sys.stdout.flush()
+		sys.stdout.write(self.msg_string % rchar)
+		sys.stdout.flush()
+
+	def put_char(self, rchar):
+		# FIXTHIS - could put activity spinner at specific location
+		# on screen (saved in start_activity?)
+		sys.stdout.write(self.backspace+rchar)
+		sys.stdout.flush()
+	
+
+tty_data = tty_data_class()
+
+# update an activity spinner
+
+def start_activity(msg):
+	tty_data.msg_string = msg + ": %s"
+	if not tty_data.show_activity:
+		vprint(msg)
+		return
+
+	tty_data.put_msg_and_char('|')
+
+def show_activity():
+	global tty_data
+
+	if not tty_data.show_activity:
+		return
+
+	# figure out next char to write
+	rindex = tty_data.rotate_index+1
+	if rindex >= len(tty_data.rotate_char_list):
+		rindex = 0
+	rchar = tty_data.rotate_char_list[rindex]
+	tty_data.rotate_index = rindex
+
+	tty_data.put_char(rchar)
+
+def end_activity():
+	if not tty_data.show_activity:
+		return
+
+	tty_data.put_char('.')
+	print
+	sys.stdout.flush()
 
 def main():
 	global debug
@@ -1402,6 +1477,10 @@ def main():
 		del sys.argv[index+1]
 		del sys.argv[index]
 		re_list.append(re_item)
+
+	if "-a" in sys.argv:
+		sys.argv.remove("-a")
+		tty_data.show_activity = True
 	
 	if "--version" in sys.argv:
 		prog_name = os.path.basename(sys.argv[0])
@@ -1432,16 +1511,19 @@ def main():
 		for filename in get_transfer_file_list():
 			os.remove(filename)
 
+
 		# generate initial index
 		index_cache = None
 		if mode=="send":
-			vprint("Generating source index...")
+			start_activity("Generating source index... ")
 			generate_index(1, config.source_index,
 				config.source_dir)
 		else:
-			vprint("Generating destination index...")
+			start_activity("Generating destination index... ")
 			generate_index(1, config.dest_index,
 				config.dest_dir)
+
+		end_activity()
 
 		sys.exit(0)
 		
