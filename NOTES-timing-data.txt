@@ -10,14 +10,14 @@ This was before I implemented fast indexing (or logging)
 
 ---------
 First run on Windows machine:
-$ time dropsync -i
+$ time sneaksync -i
 
 real    46m15.417s
 user    10m47.543s
 sys     2m46.390s
 
 First run on Linux machine:
-$ time dropsync -r -i
+$ time sneaksync -r -i
 
 real	126m37.026s
 user	10m1.154s

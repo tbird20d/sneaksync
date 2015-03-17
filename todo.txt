@@ -1,11 +1,6 @@
 Todo file for dropsync:
 
 = bugfixes blocking release
-1 - sanitize all paths
-   - verify that all paths are INSIDE the destination directory
-     - reject with extreme WARNING any that are not
-    - check that os.path.realpath(item).startswith(os.path.realpath(destdir))
-     - do this inside read_index() before creating entry instance
 
 = other bugfixes
  - fix problem with violation of transfer_size_limit 

@@ -1,3 +1,3 @@
 #!/bin/sh
 
-./dropsync -v -c sda-test-part.conf -l sda-test-part.log
+./sneaksync -v -c sda-test-part.conf -l sda-test-part.log

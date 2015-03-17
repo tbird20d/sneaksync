@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #
-# dropsync - program to backup data over a synchronized network folder
+# sneaksync - program to backup data over a synchronized network folder
 #
 # This program allows you to keep a large data directory synchronized
 # with one or more backups, using a synchronized network folder
@@ -16,6 +16,9 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 1.0.0 - rename to sneaksync.  I'm not totally happy with it, as 'sneak'
+#   has a somewhat negative connotation.  But dropsync is not available,
+#   and I don't have something better.
 # 0.9.9 - show activity on long operations (index creation)
 # 0.9.8 - refactor classes, fix resulting bugs in part file transfers
 # 0.9.7 - change recalc_list handling, add parents to index tree
@@ -53,9 +56,9 @@ import re
 #pdb.set_trace()
 
 # version information
-major_version = 0
-minor_version = 9
-revision = 9
+major_version = 1
+minor_version = 0
+revision = 0
 
 debug = 0
 verbose = 0
@@ -73,14 +76,14 @@ def usage():
   -i         initialize %s (for either send or receive)
   -v         be verbose
   -vv        be very verbose
-  -c <file>  specify configuration file (default is '/etc/sda.conf')
+  -c <file>  specify configuration file (default is '/etc/sneaksync.conf')
                if no config file is found, test settings are used
   -l <file>  log operations to the specified file
   --version  show version information, and exit
   -p <period> run the program in a loop, and poll for changes every
 	      <period> minutes
   -a         show activity status while running
-  -x <pat>   exclude directory or file matching the indicated re pattern
+  -x <pat>   exclude directories or files matching the indicated re pattern
              This option may be specified multiple times
 """ % (prog_name, prog_name)
 
@@ -107,7 +110,7 @@ class data_class:
 # but put in some defaults for testing
 default_config = config_class()
 
-test_dir = "/home/tbird/work/dropsync/test/"
+test_dir = "/home/tbird/work/sneaksync/test/"
 default_config.source_dir = test_dir+"source_dir"
 default_config.dest_dir = test_dir+"dest_dir"
 default_config.sync_dir = test_dir+"sync_dir"
@@ -126,7 +129,7 @@ def open_log(log_path, mode, gen_index):
 	logf = open(log_path, "a")
 	date_str = time.ctime()
 	write_log("=========================================================")
-	write_log("Log for dropsync execution at: %s" % date_str)
+	write_log("Log for sneaksync execution at: %s" % date_str)
 	write_log("mode=%s, gen_index=%s" % (mode, gen_index))
 	write_log("=========================================================")
 
@@ -299,19 +302,19 @@ def find_config_file(user_specified_config_file):
 		else:
 			return user_specified_config_file
 
-	# check for system sda.conf file
-	if os.path.isfile("/etc/sda.conf"):
-		return "/etc/sda.conf"
+	# check for system sneaksync.conf file
+	if os.path.isfile("/etc/sneaksync.conf"):
+		return "/etc/sneaksync.conf"
 
-	# check for user-specific ~/.sda.conf file
+	# check for user-specific ~/.sneaksync.conf file
 	home_dir = ""
 	try:
 		home_dir = os.environ["HOME"]
 	except:
 		pass
 
-	if home_dir and os.path.isfile(home_dir+os.path.sep+".sda.conf"):
-		return home_dir+os.path.sep+".sda.conf"
+	if home_dir and os.path.isfile(home_dir+os.path.sep+".sneaksync.conf"):
+		return home_dir+os.path.sep+".sneaksync.conf"
 
 	# nothing found...
 	return ""
@@ -1623,17 +1626,11 @@ if __name__ == "__main__":
 #   if file is missing or different in dest_index
 #     create transfer file in d1
 #     loop until size would be exceeded or no more files to transfer
-# check that file transfered
-#   watch dest_index for change 
-#   scan dest_index
-#     if entry for transfer file matches source, remove transfer file
+# watch dest_index for change 
 # loop until there are no more files to transfer
 #
 # == receiver algorithm ==
 # each time run, do:
-# update dest_index
-#   if dest_index is not present, generate it
-#   else scan dest_dir, and update dest_index
 # receive transfer files
 #   if there's a transfer file,
 #     [check if file in dest_dir matches or not] (optional optimization)
@@ -1641,12 +1638,19 @@ if __name__ == "__main__":
 #     update dest_index with entry for newly copied file
 #       get sha1, rewrite dest_index
 #     loop no more files to transfer
+# update dest_index
+#   if dest_index is not present, generate it
+#   else scan dest_dir, and update dest_index
+# check for more transfer files
+# loop forever
 #
 # each index entry is one line with the format
-# path, size, date, perms, sha1
+# type, path, size, date, perms, sha1
 # if path has commas, they are escaped as follows:
-#  \\ = \
-#  \, = ,
+#   % are converted to %25
+#   , are convereted %2C
 # date is of format: 2014-12-31_12:59:59
 # perms are unix perms in string format
+#
+# See NOTES-sneaksync.txt for more information
 
