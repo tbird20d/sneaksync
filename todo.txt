@@ -1,44 +1,21 @@
 Todo file for dropsync:
 
-= bugfixes
-! - fix problem with not sync-ing parts
-   - make sure recalc list is being populated and processed correctly
-   - parts for file 35 and 70 are not sending
-   - did something break in sending part files? (from *_entry refactor, or
-	is_dir change, or recalc changes?)
-   - generate source_dir again (should take 45 minutes or so)
-
- - fix problem with source period loop not detecting new dest_index sequence
-   - did dest_index sequence actually change?
-     + add print to show each dest_index sequence in loop
-
- - fix problem with violation of transfer_size_limit 
-   - first batch of 442 files created, then another batch created again
-   - is data not re-initializing properly
-   - is data.transfer_file_total_size getting reset to 0?
-
-4 - detect that root sha1 did not change after a receive (that processed
-   transfer files), and do a full re-index without a cache
-   - this is expensive, but is a last resort if something weird happens
-   - get root sha1 from previous dest_index, compare to root sha1
-   - do this in update_index??
-   - just delete dest_index file and do update_index()
-
-5 - sanitize all paths
+= bugfixes blocking release
+1 - sanitize all paths
    - verify that all paths are INSIDE the destination directory
      - reject with extreme WARNING any that are not
-     - check that os.path.realpath(item).startswith(os.path.realpath(destdir))
-     - do this inside read_index() before creating entry
+    - check that os.path.realpath(item).startswith(os.path.realpath(destdir))
+     - do this inside read_index() before creating entry instance
 
-== 1.0 features ==
- - automatically run the sender and receiver
-   - don't run receiver until transfer files have been synched to destination
-     - detect transfer complete (how?)
-       - make a transfer list? (only receiver would check it, and it's not
-          running)
-         - would have list of all expected transfer files
-         - receiver can postpone running if transfer files haven't shown up yet
-	    - should check frequently and see if anything is changing in sync_dir
+= other bugfixes
+ - fix problem with violation of transfer_size_limit 
+   - first batch of 442 files created, then another batch created again
+   - is data not re-initializing properly when doing period looping??
+   - is data.transfer_file_total_size getting reset to 0?
+
+= other high-priority features =
+ - put amount still outstanding in sender log
+   - keep size_skipped, parts_skipped, deletes_skipped stats
 
 == other features ==
  - support USB-stick mode:
@@ -49,29 +26,40 @@ Todo file for dropsync:
    - auto-detect sender or receiver mode
    - sync and unmount when transfer is complete
    - make a test config file for a USB stick
- - show activity for long operations
-   - write show_activity() routine
-   - write spinning bar to terminal
-   - call show_activity from long-running operations
-     - copy data
-     - calculate sha1
-       - call every nth loop
- - show progress percentage
-   - create work estimate
-	- count of previous index lines?
-	- count of in-memory index entries?
-   - keep track of progress
-	- lines of index written
-   - write percentage
 
-== low-priority bugs ==
-   - dropsync doesn't integrate the logs from each side
-   - don't process a transfer file if content size doesn't match
-     entry size
+ - don't run receiver until transfer files have been synched to destination
+   - detect transfer complete (how?- separate header and content??)
+     - make a transfer list? (only receiver would check it, and it's not
+        running)
+       - would have list of all expected transfer files
+       - receiver could defer running if transfer files haven't shown up yet
+         - could check frequently and see if anything is changing in sync_dir
+         - check for missing sequence numbers, and wait until they show up
+          
+     - OR, put content in separate file
+       - don't process a transfer file until content size matches transfer
 
 == nice-to-have ==
+  - have 2 periods?
+    - one for when we have files outstanding and one for when we don't
+easy - get rid of -vv (it's too much?)
+  - send more data even if dest_sequence doesn't change, if
+	we skipped items, and there are no transfer files
+     - ie use absence of transfer files to trigger sending more data
+     - this allows overlapping dest_index update and new sends
+
+easy - add areas to dprint()
+   - add debug_list
+   - add area to each dprint statement - (there are 66 dprints)
+     - determine allowed areas
+       - indexing, sha1, transfers, all
+   - only print if debug == "all" or dprint area matches item in debug_list
+ - put part_size in log header (config area)
  - read and write updates to index files directly in file instead of in memory
    - allows for arbitrarily large indexes
+   - don't know if this scales well, adding a new entry at the beginning of
+      the file requires pushing everything down (re-writing entire file)
+     - leave space for new entries?
  - make standalone Windows executable - use py2exe
  - have an option for just comparing source and destination index, to
    report the current size of the difference between the two (how much is
@@ -93,13 +81,35 @@ Todo file for dropsync:
    - measure file copy time, and give time estimate
    - use terminal code to update index line every 2 seconds
      - find total number of files to index first, and give a yy of xx status?
+ - show progress percentage (dup)
+   - create work estimate
+	- count of previous index lines?
+	- count of in-memory index entries?
+   - keep track of progress
+	- lines of index written
+   - write percentage
  - if sha1 is OK but other attributes are not, only send entry_line
    - don't send the content, and mark this as an attribute update only
  - use inotify to monitor directories for changes
    - monitor source_dir (sender)
    - monitor sync_dir (sender and receiver)
  - use an option to control 'delete in destination' (don't do it by default)
- - handle permissions correctly
+ - handle permissions correctly - do something with permissions
+   - hard for cross-OS stuff (what to do with Windows perms?)
+ - detect that root sha1 did not change after a receive (that processed
+   transfer files), and do a full re-index without a cache
+   - this is expensive, but is a last resort if something weird happens
+   - get root sha1 from previous dest_index, compare to root sha1
+   - do this in update_index??
+   - just delete dest_index file and do update_index()
+   - low priority, because can manually delete dest_index
+
+== low-priority bugs ==
+   - dropsync doesn't integrate the logs from each side
+     - if sender and receiver are writing at the same time,
+	confusion can result
+   - don't process a transfer file if content size doesn't match
+     entry size
 
 == testing ==
  - support running directly from Windows (check that paths all work)
