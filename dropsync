@@ -18,6 +18,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 0.9.8 - refactor classes, fix resulting bugs in part file transfers
 # 0.9.7 - change recalc_list handling, add parents to index tree
 # 0.9.6 - refactor global data items into a class
 # 0.9.5 - in period mode, check for activity from other side before looping
@@ -55,7 +56,7 @@ import re
 # version information
 major_version = 0
 minor_version = 9
-revision = 7
+revision = 8
 
 debug = 0
 verbose = 0
@@ -1101,7 +1102,7 @@ def walk_tree_for_updates(entry, other_tree):
 		if within_transfer_limit(entry):
 			make_transfer_file(entry, "update")
 
-	if entry.is_dir:
+	if entry.sub_entries:
 		dprint("%s is a dir, walking children" % entry.path)
 		for child in entry.sub_entries:
 			walk_tree_for_updates(child, other_tree)
@@ -1116,7 +1117,7 @@ def walk_tree_for_removes(entry, other_tree):
 	if other == None:
 		make_transfer_file(entry, "remove")
 
-	if entry.is_dir:
+	if entry.sub_entries:
 		dprint("%s is a dir, walking children" % entry.path)
 		for child in entry.sub_entries:
 			walk_tree_for_removes(child, other_tree)
@@ -1197,6 +1198,9 @@ def process_transfer_file(filename):
 			except:
 				pass
 			dprint("os.remove('%s')" % entry.path)
+
+		# FIXTHIS - what about parts?
+
 		dprint("Removing transfer file")
 		os.remove(filename)
 		data.transfer_count += 1
