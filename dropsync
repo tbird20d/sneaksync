@@ -542,6 +542,7 @@ class dir_entry(file_entry):
 class part_entry(file_entry):
 	def __init__(self, path, size, date, perms, base_path):
 		file_entry.__init__(self, path, size, date, perms, base_path)
+		# NOTE: self.path has the filename including the .partyyofxx extension
 
 		dprint("Creating part for file '%s'" % path)
 		self.is_last_part = False
@@ -1080,6 +1081,9 @@ def within_transfer_limit(entry):
 	elif entry.size > config.part_size:
 		vprint("file size greater than part limit, not sending '%s'" % \
 			entry.path)
+		if entry.is_part:
+			aprint("Error: Entry part '%s' needing transfer is not within %d part size limit" % \
+				(entry.path, config.part_size))
 		# NOTE: don't count this in our skip_count
 		return False
 	else:
@@ -1447,6 +1451,7 @@ def main():
 			if mode == "send":
 				vprint("Checking dest index sequence")
 				new_dest_seq = read_index_seq(config.dest_index)
+				vprint("New dest index sequence is %d\n" % new_dest_seq)
 				if new_dest_seq != dest_seq:
 					keep_wating = False
 			else:
