@@ -30,7 +30,7 @@ pieces, and transferring the pieces individually.
 == INSTALLATION ==
 sneaksync is a single python script.  Place it on your path, or
 make a crontab entry for it, to run periodically.  If you run
-in manually, you can put it anywhere.  It expects python
+it manually, you can put it anywhere.  It expects python
 in /usr/bin, but you can invoke it by running
   $ python sneaksync <args>
 
