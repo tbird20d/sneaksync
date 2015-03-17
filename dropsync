@@ -1426,6 +1426,7 @@ def main():
 		# now actually do the send or receive
 		if mode == "send":
 			dest_seq = read_index_seq(config.dest_index)
+			dprint("dest index sequence is %d\n" % dest_seq)
 			do_send()
 			aprint("Created %d transfer files." % data.transfer_count)
 			if data.transfer_skip_count:
@@ -1446,6 +1447,7 @@ def main():
 		# wait for next wakeup
 		keep_waiting = True
 		while keep_waiting:
+			# FIXTHIS - should do logging of this activity
 			vprint("Waiting for %d minutes..." % period)
 			time.sleep(period*60)
 
@@ -1455,15 +1457,18 @@ def main():
 			if mode == "send":
 				vprint("Checking dest index sequence")
 				new_dest_seq = read_index_seq(config.dest_index)
-				vprint("New dest index sequence is %d\n" % new_dest_seq)
+				vprint("New dest index sequence is %d" % \
+					new_dest_seq)
 				if new_dest_seq != dest_seq:
-					keep_wating = False
+					keep_waiting = False
 			else:
 				vprint("Checking for transfer files")
 				if get_transfer_file_list(): 
-					keep_waiting = False 
+					keep_waiting = False
+
 					# FIXTHIS - should wait for transfer
-					# files to finish syncing (but how??)
+					# files to finish syncing
+					# see todo.txt for notes on how
 				else:
 					# nothing found, rebuild list next time
 					data.transfer_file_list_scanned = False
