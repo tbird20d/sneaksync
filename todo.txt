@@ -12,6 +12,11 @@ Todo file for dropsync:
  - put amount still outstanding in sender log
    - keep size_skipped, parts_skipped, deletes_skipped stats
 
+related to:
+ - have an option for just comparing source and destination index, to
+   report the current size of the difference between the two (how much is
+   currently out-of-sync)
+
 == other features ==
  - support USB-stick mode:
    - auto-run on insertion of stick
@@ -35,13 +40,13 @@ Todo file for dropsync:
        - don't process a transfer file until content size matches transfer
 
 == nice-to-have ==
-  - have 2 periods?
-    - one for when we have files outstanding and one for when we don't
-easy - get rid of -vv (it's too much?)
-  - send more data even if dest_sequence doesn't change, if
-	we skipped items, and there are no transfer files
-     - ie use absence of transfer files to trigger sending more data
-     - this allows overlapping dest_index update and new sends
+ - add show_activity to reading_index and writing_index
+ - have 2 periods?
+   - one for when we have files outstanding and one for when we don't
+ - send more data even if dest_sequence doesn't change, if
+     we skipped items, and there are no transfer files
+   - ie use absence of transfer files to trigger sending more data
+   - this allows overlapping dest_index update and new sends
 
 easy - add areas to dprint()
    - add debug_list
@@ -49,16 +54,12 @@ easy - add areas to dprint()
      - determine allowed areas
        - indexing, sha1, transfers, all
    - only print if debug == "all" or dprint area matches item in debug_list
- - put part_size in log header (config area)
  - read and write updates to index files directly in file instead of in memory
    - allows for arbitrarily large indexes
    - don't know if this scales well, adding a new entry at the beginning of
       the file requires pushing everything down (re-writing entire file)
      - leave space for new entries?
  - make standalone Windows executable - use py2exe
- - have an option for just comparing source and destination index, to
-   report the current size of the difference between the two (how much is
-   currently out-of-sync)
  - have period be from start of program, not end of operations
    - so if started at 8:00 am, then run would be 10:00 at (at period 120),
      instead of, say 10:13 (assuming a 13-minute run)
@@ -98,23 +99,51 @@ easy - add areas to dprint()
    - do this in update_index??
    - just delete dest_index file and do update_index()
    - low priority, because can manually delete dest_index
+easy - get rid of -vv (it's too much?)
 
 == low-priority bugs ==
-   - dropsync doesn't integrate the logs from each side
-     - if sender and receiver are writing at the same time,
+ - dropsync doesn't integrate the logs from each side
+   - if sender and receiver are writing to the same log at the same time,
 	confusion can result
-   - don't process a transfer file if content size doesn't match
+   - short-term solution: don't use the same log
+ - don't process a transfer file if content size doesn't match
      entry size
 
 == testing ==
  - support running directly from Windows (check that paths all work)
+   that is, not running inside cygwin
+   - go from windows sender to window receiver
+
  - test using different OS for sender and receiver (e.g. Windows to Linux)
    - am using cygwin to Linux, but not Windows to Linux yet
+   - try windows to windows
+   - try linux to windows
+   - try windows to linux
+   - try windows to android
+   - try android to windows
+   - try linux to android
+   - try android to linux
 
 == long-term ideas ==
  - support sending transfer files by e-mail
- - support initiating transfers when phone connects to specific networks
+   - make part_size 10M (or whatever email allows)
+   - make a separate program to send e-mails from sync_dir on sender
+     to a specified e-mail address
+   - make a program to receive e-mails and put them in sync_dir
+     on receiver side
+     - send an ACK back to sender, and have sender remove from sync_dir
+       on the sender side
+     - after accumulating transfer files, execute sneaksync on receiver
+   - make dest_index a source, and send it back in parts by e-mail using
+     receiver as sender and vice-versa
+
+ - have phone be the sync_dir
+   - support initiating transfers when phone connects to specific networks
    - e.g. when connected to source network, run sender, and when connected
 	to dest network, run receiver, automatically (phone is intermediary)
    - may need to get permission to launch actions on host
- - send deltas instead of full files (lots of work!, but would save bandwidth)
+
+ - send deltas instead of full files for file updates
+   - lots of work!, but would save bandwidth on updates
+   - sneaksync is mostly about non-changing files (like media), so this is
+     low priority
