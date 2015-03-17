@@ -73,6 +73,7 @@ def usage():
   -r         receive files (default mode is to send)
   -i         initialize %s (for either send or receive)
   -v         be verbose
+  -vv        be very verbose
   -c <file>  specify configuration file (default is '/etc/sda.conf')
                if no config file is found, test settings are used
   -l <file>  log operations to the specified file
@@ -145,6 +146,7 @@ def write_log(msg):
 
 	if logf:
 		logf.write(msg+"\n")
+		logf.flush()
 
 def close_log():
 	global logf
@@ -169,6 +171,14 @@ def dprint(msg):
 
 # verbose print
 def vprint(msg):
+	if verbose==1:
+		print msg
+
+	# logs always get verbose messages
+	write_log(msg)
+
+# very verbose print
+def vvprint(msg):
 	if verbose:
 		print msg
 
@@ -1069,18 +1079,26 @@ def within_transfer_limit(entry):
 
 	# check count and size limits for transfer directory
 	if get_current_transfer_count() >= config.transfer_count_limit:
-		vprint("transfer count limit reached, not sending '%s' this time" % \
-			entry.path)
+		if data.transfer_skip_count < 20:
+			vprint("  Too many files already transfered, not sending '%s' this time" % \
+				entry.path)
+		else:
+			vvprint("  Too many files already transfered, not sending '%s' this time" % \
+				entry.path)
 		data.transfer_skip_count += 1
 		return False
 	elif get_current_transfer_size() + entry.size >= \
 		config.transfer_size_limit:
-		vprint("transfer size limit reached, not sending '%s' this time" % \
-			entry.path)
+		if data.transfer_skip_count < 20:
+			vprint("  Not enough space left, not sending '%s' this time" % \
+				entry.path)
+		else:
+			vvprint("  Not enough space left, not sending '%s' this time" % \
+				entry.path)
 		data.transfer_skip_count += 1
 		return False
 	elif entry.size > config.part_size:
-		vprint("file size greater than part limit, not sending '%s'" % \
+		vvprint("file size greater than part limit, not sending '%s'" % \
 			entry.path)
 		if entry.is_part:
 			aprint("Error: Entry part '%s' needing transfer is not within %d part size limit" % \
@@ -1339,6 +1357,11 @@ def main():
 	if "-v" in sys.argv:
 		sys.argv.remove("-v")
 		verbose = 1
+
+	if "-vv" in sys.argv:
+		sys.argv.remove("-vv")
+		verbose = 2
+
 	if "--debug" in sys.argv:
 		sys.argv.remove("--debug")
 		debug = 1
