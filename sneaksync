@@ -10,7 +10,9 @@
 #
 # Copyright 2014,2015 - Tim Bird <tbird20d@yahoo.com>
 #
-# see bottom of file for data and algorithm information
+# See bottom of file for data and algorithm information
+#
+# GPL version 2.0 applies.  See the LICENSE file for more information.
 #
 # To do:
 #  - on sender wakeup, detect source directory change
