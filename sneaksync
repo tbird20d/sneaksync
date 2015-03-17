@@ -137,13 +137,18 @@ def open_log(log_path, mode, gen_index):
 
 	atexit.register(close_log)
 
-def write_config_header_to_log(config):
+def write_config_header_to_log(config, mode):
 	write_log("config:")
-	write_log("  source_dir=%s" % config.source_dir)
-	write_log("  dest_dir=%s" % config.dest_dir)
+	if mode=="send":
+		write_log("  source_dir=%s" % config.source_dir)
+	else:
+		write_log("  dest_dir=%s" % config.dest_dir)
 	write_log("  sync_dir=%s" % config.sync_dir)
-	write_log("  transfer_size_limit=%s" % config.transfer_size_limit)
-	write_log("  transfer_count_limit=%s" % config.transfer_count_limit)
+	if mode=="send":
+		write_log("  transfer_size_limit=%s" %
+			config.transfer_size_limit)
+		write_log("  transfer_count_limit=%s" %
+			config.transfer_count_limit)
 	write_log("  part_size=%s" % config.part_size)
 	write_log("=========================================================")
 
@@ -321,7 +326,7 @@ def find_config_file(user_specified_config_file):
 	# nothing found...
 	return ""
 
-def get_config(default_config, config_path, command_line_re_list):
+def get_config(default_config, config_path, mode, command_line_re_list):
 	if config_path:
 		config = read_config_file(config_path)
 	else:
@@ -341,8 +346,10 @@ def get_config(default_config, config_path, command_line_re_list):
 		config.transfer_prefix+"%05d"
 
 	# directories should be absolute paths
-	config.source_dir = os.path.abspath(config.source_dir)
-	config.dest_dir = os.path.abspath(config.dest_dir)
+	if mode=="send":
+		config.source_dir = os.path.abspath(config.source_dir)
+	else:
+		config.dest_dir = os.path.abspath(config.dest_dir)
 
 	config.exclude_re_list = []
 	exclude_list = config.exclude_list.split("\n")
@@ -355,7 +362,7 @@ def get_config(default_config, config_path, command_line_re_list):
 			re_pat = re.compile(exclude_line)
 			config.exclude_re_list.append(re_pat)
 	except:
-		aprint("Error: could not process exclude list '%s'\n" % \
+		aprint("ERROR: could not process exclude list '%s'\n" % \
 			config.exclude_list)
 	
 	return config
@@ -644,7 +651,7 @@ def parse_index_entry(line, base_path):
 	# touching stuff they are not supposed to.
 	test_path = base_path + os.path.sep + path
 	if not os.path.realpath(test_path).startswith(os.path.realpath(base_path)):
-		aprint("Error: path '%s' is not inside base path '%s'" % \
+		aprint("ERROR: path '%s' is not inside base path '%s'" % \
 			(path, base_path))
 		aprint("  Aborting program...")
 		raise ValueError
@@ -755,7 +762,7 @@ def process_path(cur_path, base_path):
 			os.remove(full_path)
 			# force a recalc on it's base file
 			if not full_path.startswith(base_path):
-				aprint("Error: can't truncate full_path %s safely\n" % full_path)
+				aprint("ERROR: can't truncate full_path %s safely\n" % full_path)
 
 			rel_path = full_path[len(base_path)+1:-11]
 			dprint("Adding %s to recalc_list" % rel_path)
@@ -920,7 +927,7 @@ def read_index(filename, base_path):
 		if entry.is_part:
 			base_entry = root.lookup_by_path(entry.real_path)
 			if not base_entry:
-				aprint("Error: file entry for part is missing.")
+				aprint("ERROR: file entry for part is missing.")
 				aprint("entry.path=%s" % entry.path)
 				continue
 
@@ -936,7 +943,7 @@ def read_index(filename, base_path):
 		if entry.path.startswith(dir_stack[-1].path):
 			dir_stack[-1].add_sub_entry(entry)
 		else:
-			aprint("Error: parent dir missing from dir_stack")
+			aprint("ERROR: parent dir missing from dir_stack")
 			aprint("entry.path=%s" % entry.path)
 			aprint("dir_stack[-1].path=%s" % dir_stack[-1].path)
 
@@ -1126,7 +1133,7 @@ def within_transfer_limit(entry):
 		vvprint("file size greater than part limit, not sending '%s'" % \
 			entry.path)
 		if entry.is_part:
-			aprint("Error: Entry part '%s' needing transfer is not within %d part size limit" % \
+			aprint("ERROR: Entry part '%s' needing transfer is not within %d part size limit" % \
 				(entry.path, config.part_size))
 		# NOTE: don't count this in our skip_count
 		return False
@@ -1191,8 +1198,10 @@ def do_send():
 	vprint("Reading source index")
 	si = read_index(config.source_index, config.source_dir)
 
+	# NOTE: use source_dir as base path for dest_index
+	# - this is not right, but we're not going to write anything to it
 	vprint("Reading destination index")
-	di = read_index(config.dest_index, config.dest_dir)
+	di = read_index(config.dest_index, config.source_dir)
 	
 	# scan the indexes, and print a message for each difference
 	# do a traversal, and look up the item in the other tree
@@ -1514,10 +1523,10 @@ def main():
 
 	# find, read and validate the configuration
 	config_path = find_config_file(user_specified_config_file)
-	config = get_config(default_config, config_path, re_list)
+	config = get_config(default_config, config_path, mode, re_list)
 	validate_config(config, mode)
 
-	write_config_header_to_log(config)
+	write_config_header_to_log(config, mode)
 
 	# initialize global data (stats, counters, and transfer list)
 	data = data_class()
