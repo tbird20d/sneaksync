@@ -378,15 +378,16 @@ class file_entry:
 		# path is relative to the base_path (not an absolute path)
 		self.path = path
 		self.size = size
+		self.date = date
+		self.perms = perms
+		self.base_path = base_path
 		self.start_offset = 0
 		self.end_offset = size
 		self.last_offset = size
-		self.date = date
-		self.perms = perms
 		self.sha1 = "<none>"
-		self.base_path = base_path
 		self.sub_entries = []
 		self.parent = None
+		self.is_dir = False
 	
 		# technically true, but use this since this is not a part
 		self.is_last_part = False
@@ -468,9 +469,6 @@ class file_entry:
 	def to_line(self):
 		return "f, "+self.base_line()
 
-	def is_dir(self):
-		return False
-
 	def attr_match(self, entry):
 		dprint("self.sha1=%s" % self.sha1)
 		dprint("entry.sha1=%s" % entry.sha1)
@@ -518,6 +516,10 @@ class file_entry:
 
 
 class dir_entry(file_entry):
+	def __init__(self, path, size, date, perms, base_path):
+		file_entry.__init__(self, path, size, date, perms, base_path)
+		self.is_dir = True
+
 	def calculate_sha1(self):
 		# sha1 for a directory is the digest of sub-entry strings
 		# sorted by path
@@ -533,19 +535,15 @@ class dir_entry(file_entry):
 	def to_line(self):
 		return "d, "+self.base_line()
 
-	def is_dir(self):
-		return True
-
 
 # path for file ends in ".partyyofxx"
 # e.g.  testfile.part02of13
 #               01234567890
 class part_entry(file_entry):
 	def __init__(self, path, size, date, perms, base_path):
-		# path is stored in unescaped format
-		# path is relative to the base_path (not an absolute path)
+		file_entry.__init__(self, path, size, date, perms, base_path)
+
 		dprint("Creating part for file '%s'" % path)
-		self.path = path
 		self.is_last_part = False
 
 		# check for and parse partyyofxx
@@ -593,10 +591,7 @@ class part_entry(file_entry):
 
 		self.size = self.end_offset - self.start_offset
 		dprint("self.size=%d" % self.size)
-		self.date = date
-		self.perms = perms
 		self.sha1 = "<none>"
-		self.base_path = base_path
 		self.is_part = True
 
 	def full_path(self):
@@ -765,14 +760,14 @@ def process_path(cur_path, base_path):
 
 def print_tree(entry):
 	aprint(entry.to_line())
-	if entry.is_dir():
+	if entry.sub_entries:
 		# NOTE: sub_entries should already be sorted
 		for child in entry.sub_entries:
 			print_tree(child)
 
 def write_tree(f, entry):
 	f.write(entry.to_line()+"\n")
-	if entry.is_dir():
+	if entry.sub_entries:
 		# NOTE: sub_entries should already be sorted
 		for child in entry.sub_entries:
 			write_tree(f,child)
@@ -817,7 +812,7 @@ def process_recalc_list(entry, do_recalc):
 				recalc_entry.sha1 = "<none>"
 
 			# recalc on parts of a file as well
-			if not recalc_entry.is_dir():
+			if not recalc_entry.is_dir:
 				for child in recalc_entry.sub_entries:
 					if do_recalc:
 						recalc_entry.calculate_sha1()
@@ -845,7 +840,7 @@ def generate_index(seq, filename, dir_to_be_indexed):
 	entry_list = process_path(dir_to_be_indexed, dir_to_be_indexed)
 
 	# sanity check - should return a list containing a single dir entry
-	if not entry_list or len(entry_list)>1 or not entry_list[0].is_dir():
+	if not entry_list or len(entry_list)>1 or not entry_list[0].is_dir:
 		aprint("ERROR: unexpected result from process_path")
 	entry = entry_list[0]
 
@@ -912,7 +907,7 @@ def read_index(filename, base_path):
 			aprint("dir_stack[-1].path=%s" % dir_stack[-1].path)
 
 		# if I'm a directory, put me on dir_stack
-		if entry.is_dir():
+		if entry.is_dir:
 			dir_stack.append(entry)
 	
 	return index_class(sequence, root)
@@ -1021,7 +1016,7 @@ def make_transfer_file(entry, transfer_type):
 	# must be an "update" transfer
 	outfile.write(entry.to_line()+"\n")
 
-	if not entry.is_dir():
+	if not entry.is_dir:
 		# put file content after entry line
 		# content is from entry.start_offset to entry.end_offset
 		dprint("trying to write %d bytes for file %s" % \
@@ -1102,7 +1097,7 @@ def walk_tree_for_updates(entry, other_tree):
 		if within_transfer_limit(entry):
 			make_transfer_file(entry, "update")
 
-	if entry.is_dir():
+	if entry.is_dir:
 		dprint("%s is a dir, walking children" % entry.path)
 		for child in entry.sub_entries:
 			walk_tree_for_updates(child, other_tree)
@@ -1117,7 +1112,7 @@ def walk_tree_for_removes(entry, other_tree):
 	if other == None:
 		make_transfer_file(entry, "remove")
 
-	if entry.is_dir():
+	if entry.is_dir:
 		dprint("%s is a dir, walking children" % entry.path)
 		for child in entry.sub_entries:
 			walk_tree_for_removes(child, other_tree)
@@ -1184,7 +1179,7 @@ def process_transfer_file(filename):
 
 	if entry.sha1 == "<deleted>":
 		tf.close()
-		if entry.is_dir():
+		if entry.is_dir:
 			vprint("Deleting directory")
 			try:
 				os.rmdir(entry.full_path())
@@ -1208,7 +1203,7 @@ def process_transfer_file(filename):
 	data.recalc_list.append(entry.path)
 
 	# Now, let's make something
-	if entry.is_dir():
+	if entry.is_dir:
 		# make directory, if not already present
 		vprint("Creating directory")
 		tf.close()
