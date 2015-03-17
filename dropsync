@@ -13,8 +13,6 @@
 # see bottom of file for data and algorithm information
 #
 # To do:
-#  - write correct sequence number in index file (other_index sequence + 1)
-#  - on sender wakeup, detect dest-index change
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
@@ -141,6 +139,7 @@ def write_config_header_to_log(config):
 	write_log("  sync_dir=%s" % config.sync_dir)
 	write_log("  transfer_size_limit=%s" % config.transfer_size_limit)
 	write_log("  transfer_count_limit=%s" % config.transfer_count_limit)
+	write_log("  part_size=%s" % config.part_size)
 	write_log("=========================================================")
 
 def write_log(msg):
@@ -184,7 +183,7 @@ def vvprint(msg):
 	if verbose:
 		print msg
 
-	# logs always get verbose messages
+	# logs also get very verbose messages
 	write_log(msg)
 
 
@@ -326,9 +325,10 @@ def get_config(default_config, config_path, command_line_re_list):
 		aprint("   please specify a config file using -c, or place")
 		aprint("   a config file in '/etc' or your home directory.")
 
-	# NOTE - source index does not have to be in the sync dir
+	# NOTE - source index does not need to be in the sync dir
 	# but it makes it easier to debug the script.
 	# source_index should NOT be inside the source_dir, however
+	# FIXTHIS - should probably make source_index path configurable
 	config.source_index = config.sync_dir+os.path.sep+"source_index"
 	config.dest_index = config.sync_dir+os.path.sep+"dest_index"
 	config.transfer_prefix = "transfer_file_"
@@ -631,6 +631,18 @@ def parse_index_entry(line, base_path):
 	date = parts[3]
 	perms = parts[4]
 	sha1 = parts[5]
+
+	# VERY IMPORTANT!!
+	# sanity-check the input here.  Path must be inside
+	# the intended base directory, or we reject it.
+	# This is to prevent tampered-with transfer files
+	# touching stuff they are not supposed to.
+	test_path = base_path + os.path.sep + path
+	if not os.path.realpath(test_path).startswith(os.path.realpath(base_path)):
+		aprint("Error: path '%s' is not inside base path '%s'" % \
+			(path, base_path))
+		aprint("  Aborting program...")
+		raise ValueError
 	
 	if entry_type == "f":
 		e = file_entry(path, size, date, perms, base_path)
@@ -1225,7 +1237,7 @@ def process_transfer_file(filename):
 				pass
 			dprint("os.remove('%s')" % entry.path)
 
-		# FIXTHIS - what about parts?
+		# FIXTHIS -what about removing parts? (not sure it makes sense)
 
 		dprint("Removing transfer file")
 		os.remove(filename)
@@ -1315,7 +1327,7 @@ def process_transfer_file(filename):
 	mtime = entry.mtime()
 	os.utime(entry.full_path(), (mtime,mtime))
 	
-	# FIXTHIS - adjust permissions
+	# FIXTHIS - write code to adjust permissions
 
 	dprint("Removing transfer file")
 	os.remove(filename)
@@ -1350,7 +1362,7 @@ class tty_data_class:
 		self.rotate_char_list = ['|','/','-','\\']
 		self.rotate_index = 0
 		self.msg_string = "activity: %s"
-	
+
 	def put_msg_and_char(self, rchar):
 		# FIXTHIS - could put activity spinner at specific location
 		# on screen (saved in start_activity?)
@@ -1364,18 +1376,17 @@ class tty_data_class:
 		sys.stdout.flush()
 
 	def put_char(self, rchar):
-		# FIXTHIS - could put activity spinner at specific location
-		# on screen (saved in start_activity?)
+		# backup and rewrite one char
 		sys.stdout.write(self.backspace+rchar)
 		sys.stdout.flush()
-	
+
 
 tty_data = tty_data_class()
 
 # update an activity spinner
 
 def start_activity(msg):
-	tty_data.msg_string = msg + ": %s"
+	tty_data.msg_string = msg + " %s"
 	if not tty_data.show_activity:
 		vprint(msg)
 		return
@@ -1515,11 +1526,11 @@ def main():
 		# generate initial index
 		index_cache = None
 		if mode=="send":
-			start_activity("Generating source index... ")
+			start_activity("Generating source index...")
 			generate_index(1, config.source_index,
 				config.source_dir)
 		else:
-			start_activity("Generating destination index... ")
+			start_activity("Generating destination index...")
 			generate_index(1, config.dest_index,
 				config.dest_dir)
 
