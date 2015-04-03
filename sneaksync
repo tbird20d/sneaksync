@@ -18,6 +18,8 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 1.1.0 - use posix path separator in index and transfer files, even on
+#   Windows (all other paths use local separator)
 # 1.0.0 - rename to sneaksync.  I'm not totally happy with it, as 'sneak'
 #   has a somewhat negative connotation.  But dropsync is not available,
 #   and I don't have something better.
@@ -65,7 +67,17 @@ revision = 0
 debug = 0
 verbose = 0
 
-# used to speed up index generation
+# path separator - don't use os.path.sep for filenames in index and 
+# transfer files.  The separators have to be the same to allow
+# interoperability between platforms (eg syncing from Windows to Linux).
+# Windows takes both "\" and "/", and Linux only
+# takes "/", so use that for index and transfer files.
+
+# base_line(), to_line() and dir_entry.calculate_sha1() use posix_sep
+# all other paths use local separators
+posix_sep = "/"
+
+# a cache is used to speed up index generation
 # has the previous index tree, if index file is present
 index_cache = None
 
@@ -418,7 +430,7 @@ class file_entry:
 		self.is_last_part = False
 		self.is_part = False
 	
-	def full_path(self):
+	def fs_path(self):
 		return self.base_path + os.path.sep + self.path
 
 	def escape_path(self, path):
@@ -468,7 +480,7 @@ class file_entry:
 			# file content
 
 		# for a file or part, get sha1 of (part of) the file content
-		f = open(self.full_path(), mode = 'rb')
+		f = open(self.fs_path(), mode = 'rb')
 		offset = self.start_offset
 		f.seek(offset)
 		d = sha.new()
@@ -486,6 +498,9 @@ class file_entry:
 
 	def base_line(self):
 		epath = self.escape_path(self.path)
+		# use posix separator ("/") in index and transfer entries
+		if os.path.sep != posix_sep:
+			epath = epath.replace(os.path.sep, posix_sep)
 		if self.sha1 == "<none>":
 			aprint("ERROR: sha1 not calculated yet!")
 		return "%s, %d, %s, %s, %s" % (epath, self.size,
@@ -620,7 +635,8 @@ class part_entry(file_entry):
 		self.sha1 = "<none>"
 		self.is_part = True
 
-	def full_path(self):
+	def fs_path(self):
+		# return path to file this part is part of
 		return self.base_path + os.path.sep + self.real_path
 	
 	def to_line(self):
@@ -643,6 +659,11 @@ def parse_index_entry(line, base_path):
 	date = parts[3]
 	perms = parts[4]
 	sha1 = parts[5]
+
+	# convert from posix to local path separators, if different
+	# FIXTHIS - can't sync paths with backslashes from Linux to Windows
+	if os.path.sep != posix_sep:
+		path = path.replace(posix_sep, os.path.sep)
 
 	# VERY IMPORTANT!!
 	# sanity-check the input here.  Path must be inside
@@ -733,11 +754,11 @@ def create_part_entries(fentry, base_path):
 		part_num += 1
 	return entries
 
+
 # returns a list containing: 1) a single file, 2) a single directory, or
 #    3) a file and multiple part entries
 def process_path(cur_path, base_path):
 	global data
-
 
 	show_activity()
 
@@ -1064,8 +1085,8 @@ def make_transfer_file(entry, transfer_type):
 		# put file content after entry line
 		# content is from entry.start_offset to entry.end_offset
 		dprint("trying to write %d bytes for file %s" % \
-			(entry.size, entry.full_path()))
-		infile = open(entry.full_path(), "rb")
+			(entry.size, entry.fs_path()))
+		infile = open(entry.fs_path(), "rb")
 		offset = entry.start_offset
 		infile.seek(offset)
 		buf = 0
@@ -1239,14 +1260,14 @@ def process_transfer_file(filename):
 		if entry.is_dir:
 			vprint("Deleting directory")
 			try:
-				os.rmdir(entry.full_path())
+				os.rmdir(entry.fs_path())
 			except:
 				pass
 			dprint("os.rmdir('%s')" % entry.path)
 		else:
 			vprint("Deleting file")
 			try:
-				os.remove(entry.full_path())
+				os.remove(entry.fs_path())
 			except:
 				pass
 			dprint("os.remove('%s')" % entry.path)
@@ -1268,27 +1289,27 @@ def process_transfer_file(filename):
 		vprint("Creating directory")
 		tf.close()
 		try:
-			os.makedirs(entry.full_path())
+			os.makedirs(entry.fs_path())
 		except:
 			pass
 	else:
 		vprint("Copying file contents")
 		# create leading dirs in destination dir if needed
 		try:
-			os.makedirs(os.path.dirname(entry.full_path()))
+			os.makedirs(os.path.dirname(entry.fs_path()))
 		except:
 			pass
 
 		# if file doesn't exist yet, create it
-		if not os.path.exists(entry.full_path()):
-			open(entry.full_path(), "wb").close()
+		if not os.path.exists(entry.fs_path()):
+			open(entry.fs_path(), "wb").close()
 
 		# copy the file contents from remainder of transfer file
-		dprint("writing to file %s" % entry.full_path())
+		dprint("writing to file %s" % entry.fs_path())
 		# NOTE - don't mess with this open mode unless you know
 		# exactly what you're doing...  Other modes truncate the file
 		# or don't open newly created files.
-		outfile = open(entry.full_path(), "r+b")
+		outfile = open(entry.fs_path(), "r+b")
 		offset = entry.start_offset
 		dprint("seeking to offset %d" % offset)
 		outfile.seek(offset)
@@ -1320,7 +1341,7 @@ def process_transfer_file(filename):
 			# write the part file itself also
 			tf.seek(0)
 			line = tf.readline()
-			part_path = entry.base_path + os.sep + entry.path
+			part_path = entry.base_path + os.path.sep + entry.path
 			outfile = open(part_path, "wb")
 			buf = 0
 			while buf != b'':
@@ -1331,15 +1352,15 @@ def process_transfer_file(filename):
 
 		# if dest file is too big (e.g. it was shortened on source),
 		# truncate it
-		if os.path.getsize(entry.full_path()) > entry.last_offset:
-			outfile = open(entry.full_path(), "r+b")
+		if os.path.getsize(entry.fs_path()) > entry.last_offset:
+			outfile = open(entry.fs_path(), "r+b")
 			outfile.truncate(entry.last_offset)
 
 		tf.close()
 
 	# touch the file date and time
 	mtime = entry.mtime()
-	os.utime(entry.full_path(), (mtime,mtime))
+	os.utime(entry.fs_path(), (mtime,mtime))
 	
 	# FIXTHIS - write code to adjust permissions
 

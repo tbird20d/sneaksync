@@ -4,8 +4,15 @@ Todo file for dropsync:
  - make some proper documentation
    - explain all configuration options
    - give usage examples (one is in README.txt already)
+ - change to use #!/usr/bin/env python
+ - change README.txt to use github markup
 
 = bugfixes blocking release
+ - handle differences in os.path.sep between windows and Linux
+   - Windows uses \, Linux uses /
+   - see if any windows files have forward slashes
+   - see if any Linux files have back slashes (yes - in udev for \x2f)
+ - make sure deletion transfer file adhere to transfer_file_count limits
 
 = other bugfixes
  - fix problem with violation of transfer_size_limit 
