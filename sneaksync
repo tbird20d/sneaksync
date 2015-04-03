@@ -18,7 +18,8 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
-# 1.1.0 - use posix path separator in index and transfer files, even on
+# 1.0.2 - open index file in binary mode so Windows doesn't add \r on lines
+# 1.0.1 - use posix path separator in index and transfer files, even on
 #   Windows (all other paths use local separator)
 # 1.0.0 - rename to sneaksync.  I'm not totally happy with it, as 'sneak'
 #   has a somewhat negative connotation.  But dropsync is not available,
@@ -62,7 +63,7 @@ import re
 # version information
 major_version = 1
 minor_version = 0
-revision = 0
+revision = 2
 
 debug = 0
 verbose = 0
@@ -480,7 +481,7 @@ class file_entry:
 			# file content
 
 		# for a file or part, get sha1 of (part of) the file content
-		f = open(self.fs_path(), mode = 'rb')
+		f = open(self.fs_path(), 'rb')
 		offset = self.start_offset
 		f.seek(offset)
 		d = sha.new()
@@ -835,7 +836,7 @@ def write_tree(f, entry):
 			write_tree(f,child)
 
 def write_index(filename, index):
-	f = open(filename, "w")
+	f = open(filename, "wb")
 
 	seq_line = "%040d\n" % index.sequence
 	f.write(seq_line)
@@ -916,7 +917,7 @@ def generate_index(seq, filename, dir_to_be_indexed):
 
 # returns sequence of index file
 def read_index_seq(filename):
-	f = open(filename, "r")
+	f = open(filename, "rb")
 
 	seq_line = f.readline()
 	sequence = int(seq_line)
@@ -925,7 +926,7 @@ def read_index_seq(filename):
 
 # returns an index object for the root of the tree
 def read_index(filename, base_path):
-	f = open(filename, "r")
+	f = open(filename, "rb")
 
 	seq_line = f.readline()
 	sequence = int(seq_line)
@@ -1064,7 +1065,7 @@ def make_transfer_file(entry, transfer_type):
 	vprint("Creating transfer file '%s' for file '%s'" % \
 		(filename, entry.path))
 
-	outfile = open(filename, "w")
+	outfile = open(filename, "wb")
 	data.transfer_file_list.append(filename)
 
 	if transfer_type == "remove":
