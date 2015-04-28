@@ -18,6 +18,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 1.0.3 - handle several file system exception conditions
 # 1.0.2 - open index file in binary mode so Windows doesn't add \r on lines
 # 1.0.1 - use posix path separator in index and transfer files, even on
 #   Windows (all other paths use local separator)
@@ -63,7 +64,7 @@ import re
 # version information
 major_version = 1
 minor_version = 0
-revision = 2
+revision = 3 
 
 debug = 0
 verbose = 0
@@ -481,7 +482,13 @@ class file_entry:
 			# file content
 
 		# for a file or part, get sha1 of (part of) the file content
-		f = open(self.fs_path(), 'rb')
+		try:
+			f = open(self.fs_path(), 'rb')
+		except IOError:
+			# file may be in use, just skip it for now
+			self.sha1 = 0
+			return self.sha1
+
 		offset = self.start_offset
 		f.seek(offset)
 		d = sha.new()
@@ -804,7 +811,12 @@ def process_path(cur_path, base_path):
 	if os.path.isdir(full_path):
 		entry = create_dir_entry(full_path, base_path)
 
-		item_list = os.listdir(full_path)
+		try:
+			item_list = os.listdir(full_path)
+		except WindowsError:
+			# ignore junction directories
+			# FIXTHIS - do I need to not create the dir entry also?
+			item_list = ""
 
 		for item in item_list:
 			item_path = os.path.join(full_path, item)
@@ -1087,7 +1099,17 @@ def make_transfer_file(entry, transfer_type):
 		# content is from entry.start_offset to entry.end_offset
 		dprint("trying to write %d bytes for file %s" % \
 			(entry.size, entry.fs_path()))
-		infile = open(entry.fs_path(), "rb")
+		try:
+			infile = open(entry.fs_path(), "rb")
+		except:
+			# some kind of error, just skip this file
+			aprint("ERROR: can not read data for file '%s'" % \
+				entry.fs_path())
+			outfile.close()
+			data.transfer_count += 1
+			data.transfer_file_total_size += os.path.getsize(filename)
+			return
+			
 		offset = entry.start_offset
 		infile.seek(offset)
 		buf = 0
@@ -1303,7 +1325,11 @@ def process_transfer_file(filename):
 
 		# if file doesn't exist yet, create it
 		if not os.path.exists(entry.fs_path()):
-			open(entry.fs_path(), "wb").close()
+			try:
+				open(entry.fs_path(), "wb").close()
+			except: 
+				aprint("ERROR creating file '%s'" % entry.fs_path())
+				return
 
 		# copy the file contents from remainder of transfer file
 		dprint("writing to file %s" % entry.fs_path())

@@ -6,13 +6,40 @@ Todo file for dropsync:
    - give usage examples (one is in README.txt already)
  - change to use #!/usr/bin/env python
  - change README.txt to use github markup
+ - add cache directory to exclude list for home/work transfer
 
 = bugfixes blocking release
- - handle differences in os.path.sep between windows and Linux
-   - Windows uses \, Linux uses /
-   - see if any windows files have forward slashes
-   - see if any Linux files have back slashes (yes - in udev for \x2f)
  - make sure deletion transfer file adhere to transfer_file_count limits
+   - have a limit of 2000 files, but saw 26000 deletions
+ - Fix this problem with filenames:
+Processing transfer file 00373, for path 'AppData/Local/Cockatrice/Cockatrice/pics/downloadedPics/ARN/El-Hajj�j.jpg'
+Copying file contents
+Traceback (most recent call last):
+  File "/home/CORPUSERS/10102229/Dropbox/sneaksync-transfer/work/sneaksync", line 1646, in <module>
+    main()
+  File "/home/CORPUSERS/10102229/Dropbox/sneaksync-transfer/work/sneaksync", line 1598, in main
+    do_receive()
+  File "/home/CORPUSERS/10102229/Dropbox/sneaksync-transfer/work/sneaksync", line 1394, in do_receive
+    process_transfer_file(filename)
+  File "/home/CORPUSERS/10102229/Dropbox/sneaksync-transfer/work/sneaksync", line 1317, in process_transfer_file
+    open(entry.fs_path(), "wb").close()
+IOError: [Errno 84] Invalid or incomplete multibyte or wide character: '/media/My Passport/Asus-backup-2014-10-29/Users/Family/AppData/Local/Cockatrice/Cockatrice/pics/downloadedPics/ARN/El-Hajj\xe2j.jpg'
+
+   - some info:
+     - The MICHEAL BUBLE-COME FLY WITH ME file has a 0x00c9 (apparently utf16)
+       code for the E (should be E with grave accent).
+        The string for this is just 0xc9 in the transfer file, but displays
+	as %c3%89 in the python string in Windows.
+     - I can create this file by hand in python (from the python interpreter
+       shell) without any problem.
+        - I don't know why I'm getting the multi-byte error when trying
+        to create the file from the sneaksync program
+     - there are routines str.encode() and str.decode() to handle
+       converting between different forms of unicode or code pages.
+     - I'm not sure how to use them to solve this problem
+     - for now, I just abort the file creation, and leave the transfer files
+       sitting there, after printing an error for this python error throw
+
 
 = other bugfixes
  - fix problem with violation of transfer_size_limit 
