@@ -18,6 +18,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 1.1.0 - handle Windows filename encoding of mbcs (by converting to utf8)
 # 1.0.3 - handle several file system exception conditions
 # 1.0.2 - open index file in binary mode so Windows doesn't add \r on lines
 # 1.0.1 - use posix path separator in index and transfer files, even on
@@ -63,11 +64,12 @@ import re
 
 # version information
 major_version = 1
-minor_version = 0
-revision = 3 
+minor_version = 1
+revision = 0 
 
 debug = 0
 verbose = 0
+fs_encoding = sys.getfilesystemencoding()
 
 # path separator - don't use os.path.sep for filenames in index and 
 # transfer files.  The separators have to be the same to allow
@@ -441,13 +443,25 @@ class file_entry:
 		# , -> %2C
 		new1 = path.replace("%", "%25")
 		new2 = new1.replace(",", "%2C")
-		return new2
+
+		# also, convert from mbcs to utf8 if needed
+		if fs_encoding=="mbcs":
+			new3 = new2.decode("mbcs").encode("utf8")
+		else:
+			new3 = new2
+		return new3
 
 	def unescape_path(self, path):
 		# back these out in reverse order of application
-		new1 = path.replace("%2C", ",")
-		new2 = new1.replace("%25", "%")
-		return new2
+
+		# convert from utf8 to mbcs, if needed
+		if fs_encoding=="mbcs":
+			new1 = path.decode("utf8").encode("mbcs")
+		else:
+			new1 = path
+		new2 = new1.replace("%2C", ",")
+		new3 = new2.replace("%25", "%")
+		return new3
 
 	def mtime(self):
 		# returns time in seconds since epoch
@@ -1708,6 +1722,7 @@ if __name__ == "__main__":
 # if path has commas, they are escaped as follows:
 #   % are converted to %25
 #   , are convereted %2C
+#   mbcs-encoded filenames are converted to utf8
 # date is of format: 2014-12-31_12:59:59
 # perms are unix perms in string format
 #

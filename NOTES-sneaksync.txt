@@ -49,6 +49,9 @@ is escaped as follows:
  % are converted to %25
  , are convereted %2C
 
+Also, paths are encoded in utf8.  Windows filenames, which may be
+encoded in 'mbcs' format, are converted to utf8. 
+
 size is a decimal number.  For parts, for all but the last part of the
 file, the size should always be equal to the part_size specified in
 the configuration file.
