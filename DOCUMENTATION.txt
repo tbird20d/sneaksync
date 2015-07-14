@@ -9,6 +9,7 @@ Sections:
   INSTALLATION
   USAGE
   CONFIGURATION
+  TIPS
 
 == USE CASE ==
 The use case is as follows:
@@ -28,10 +29,11 @@ supports transferring files larger than the shared directory size, by
 breaking large files into pieces, and transferring the pieces individually.
 
 == INSTALLATION ==
-The sneaksync program is a single python script.  Place it on your path, or
-make a crontab entry for it, to run periodically.  If you run
-it manually, you can put it anywhere.  It expects python
-in /usr/bin, but you can invoke it by running
+
+The sneaksync program is a single python script.  Place it on your path
+to make it easier to run in manually, or make a crontab entry for it to
+run it periodically.  It expects python in /usr/bin, but you can invoke
+it by running
   $ python sneaksync <args>
 
 Create a directory in the local folder or directory of your network
@@ -96,11 +98,13 @@ sync_dir=<dir>
 transfer_size_limit=<num>
 transfer_count_limit=<num>
 part_size=<num>
- - must be the same in sender and receiver configurations
 exclude_list=<multi-line list>
 
 For the receiver:
+
+sync_dir=<dir>
 dest_dir=<dir>
+part_size=<num>
 exclude_list=<multi-line list>
 
 multi-line options start and end with a triple-quote, like so:
@@ -108,20 +112,135 @@ exclude_list="""pattern1
 pattern2
 pattern3"""
 
-The exclude list has one regular expression per line. Any path that matches
-the regular expression will be omitted from processing, when creating
-the index or processing the directories.  Note that a python re.search()
-function is used (so the match may be anywhere in the path string, not
-just at the beginning).
+source_dir: is the directory to transfer from the sending machine.
+Basically this indicates the top directory of a set of directories and
+files to transfer to and keep synchronized with the destination.
+
+sync_dir: is the directory where the sender and receiver will transfer
+information and files back and forth to each other.  These may have
+different paths on the sender and the receiver machines.  It expected
+that your cloud software (Dropbox, Google Drive, etc.) will keep
+this directory synchronized between the two machines.
+
+transfer_size_limit: is the number, in bytes, of the total size that
+can be used in the sync directory for transferring files.  Usually,
+a "cloud drive" will have some upper limit on the amount of data it
+can contain.  You may be using the drive for other data.  The 
+config option specifies how much space should be used for transferring
+data in the sync_dir.  If you have a cloud drive with 5 gigabyes of
+data, and you need 3 gig for other data, you would specify 2000000000
+here.  (That's 2G)  That much space must be available at all times
+on your cloud drive, for transfers.
+
+transfer_count_limit: is the maximum number of files you want in
+your sync_dir for transferring files, at any one time.  I usually set
+this to something like 5000, just to keep the sync_dir from getting
+too cluttered.  But you can set this higher if you like.
+
+part_size: is the number, in bytes, of the maximum file part to be
+transferred at a time.  I recommend this number be about 30% of the
+transfer_size_limit. It can be larger, but it should not be more than
+about 80% of the transfer_size_limit. It is used to break large files
+into smaller parts that can be transferred within the limit of the cloud
+drive.  I usually use 600000000 for this (600M).
+
+NOTE: This number must be the same in both the sender and receiver
+configuration files!
+
+  
+exclude_list: is a list of regular expression patterns to exclude
+from sneaksync processing.
+
+The exclude list is triple-quoted, and has one regular expression per
+line. Any path that matches one of the regular expression will be
+omitted from processing, when creating the index or processing the
+directories.  Note that a python re.search() function is used (so the
+expression may match anywhere in the path string, not just at the
+beginning).
 
 Here are some examples:
 
 exclude_list="""Dropbox
 [Cc]ache"""
 
+Make sure to use the correct slashes for your sender.  That is, if
+on Windows, use back-slashes, and on Linux or Mac use forward slashes,
+if you want to include a slash in your regular expression.
+
+See https://docs.python.org/2/library/re.html for the regular expression
+syntax used for this test.
+
+If your sync directory is contained within your source directory, you
+should definitely put an entry in your exclude list to omit it from
+processing.
+
+== Command Line Usage ==
+Here are the command line options supported by sneaksync:
+
+ -h         Show sneaksync command line usage info
+
+ -r         Run sneaksync in 'receiver' mode.  If this option is
+            not present, sneaksync runs in 'sender' mode.
+
+ -i         Initialize sneaksync.  This generates the index (either
+            source_index or dest_index) based on the configuration file,
+            in preparation for sneaksync operation.  In order for
+            sneaksync to work, both indexes must be created.  That is,
+            you must initialize both the sender and receiver before
+            sneaksync can begin to transfer files.
+
+ -v         Show verbose output
+
+ -vv        Show very verbose output
+
+ -c <file>  Specify the sneaksync configuration file.  If not specified,
+            a default of '/etc/sneaksync.conf' is used.
+            (If no config file is found, a special test configuration is
+            used.  This is probably not what you want.)
+
+ -l <file>  Write output to the specified log file
+
+ --version  Show sneaksync version information, and exit
+
+ -p <period> Run the program in a loop, and poll for changes every
+	    <period> minutes.  For a sender this means polling the
+            source directory for new and changed files, and for a
+            receiver, this means checking the sync_dir for transfer
+            files.
+
+ -a         Show activity status while running.  Some operations, like
+            scanning the source or destination directory, or generating
+            signatures for extremely large files, take several seconds
+            or up to minutes.  Using the '-a' option will cause
+            sneaksync to show a spinning activity indicator, while it
+            is running.  This helps you know it is not stuck or hung.
+
+ -x <pat>   Indicate a pattern used to exclude directories or files
+            from being processed by sneaksync.  This option may be
+            specified multiple times, and is exactly the same as
+            the 'exclude_list' configuration option.  This option
+            may be specified multiple times, to specify multiple
+            exclude patterns.  The pattern should be a python
+            regular expression.
+
+== TIPS ==
+Here are some miscelaneous tips for using sneaksync.
 
 IMPORTANT NOTE: It is a bad idea, security-wise, to put either the
 sender or receiver config file in any of the directories manipulated
 by the program: the source directory, sync directory or the
 destination directory.
+
+I have found that a pretty good transfer_count_limit for dropbox cloud drives
+is about 5000.  I haven't experimented a lot, but I found that transferring
+large numbers of files (40,000 or 20,000, for example), takes extremely long.
+I believe there is some limit in the dropbox algorithm which throttles
+or bottlenecks when the file count gets over a certain amount, in a single
+directory.  I found that with a very full directory, dropbox only transfers
+about 200 files per minute.
+
+To repeat something mentioned previoiusly...
+If your sync directory is contained within your source directory, you
+should definitely put an entry in your exclude list to omit it from
+processing.
 
