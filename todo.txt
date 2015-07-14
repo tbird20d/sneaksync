@@ -8,17 +8,40 @@ Todo file for dropsync:
  - change to use #!/usr/bin/env python
  - change README.txt to use github markup
 
-= bugfixes blocking release
- - windows sender is not ignoring /Cache/ directories
-   - see the sender log for 2015-05-07
- - make sure deletion transfer file adhere to transfer_file_count limits
-   - have a limit of 2000 files, but saw 26000 deletions
+= bugfixes blocking release =
+ - handle conversion of directory to file or vice-versa
+   - see windows-sender.log for inability to transfer directory "Documents/My Music" because a file with that name is on the target
+   - here is what was in "Documents/My Music": !<symlink>��/cygdrive/c/Users/Family/Music
+   - need to handle windows symlinks?
+   - why isn't file getting deleted?
+   - why isn't directory (symlink?) getting created??? (probably because file exists)
+   - what is transfer file?? (probably empty dir creation)
+ - timdesk (receiver) stopped processing files from May 30 to June 12
+   - I ran the script manually on June 12, and it worked
+ - windows sender didn't avoid sending new files
+   - size throttling isn't working
+   - I had 3.4G of files in the dropbox folder
+   - Dropbox reporting that I used 207% of 5GB limit
+   - after running receiver once (acutally, rm -rf ; ctrl-C, sda-receive.sh)
+     - another 9GB of files showed up in the transfer directory (??)
+
+= documentation =
+ - list exclude patterns that are useful in Windows and Linux
+   - eg. \\AppData\\.*[Cc]ache
+   - NTUSER.dat ntuser
+   - (see windows-sender.conf)
 
 = other bugfixes
  - fix problem with violation of transfer_size_limit 
    - first batch of 442 files created, then another batch created again
    - is data not re-initializing properly when doing period looping??
    - is data.transfer_file_total_size getting reset to 0?
+   - need to verify if this is still a bug
+
+ - do a different file size limit for deletion (don't check size of file
+   content, but only size of transfer file.
+   - have a separate within_transfer_limit() for deletions
+     - pass content size to within_transfer_limit
 
 = other high-priority features =
  - put amount still outstanding in sender log
@@ -28,8 +51,10 @@ related to:
  - have an option for just comparing source and destination index, to
    report the current size of the difference between the two (how much is
    currently out-of-sync)
+   - this is currently done by show-remaining, not in 'sneaksync' proper
 
 == other features ==
+ - add logfile to config
  - support USB-stick mode:
    - auto-run on insertion of stick
      - see http://www.instructables.com/id/How-to-make-flash-drive-that-copys-users-files-si/4/
@@ -50,6 +75,10 @@ related to:
           
      - OR, put content in separate file
        - don't process a transfer file until content size matches transfer
+ - process transfer files as they arrive (and are valid?)
+   - check content size in first line against content size of file
+     - get size of header line, and subtract from full file size
+   - check content sha1 to validate it's all there? (probably not)
 
 == nice-to-have ==
  - add show_activity to reading_index and writing_index
@@ -66,6 +95,8 @@ easy - add areas to dprint()
      - determine allowed areas
        - indexing, sha1, transfers, all
    - only print if debug == "all" or dprint area matches item in debug_list
+ - combine walk_tree_for_updates() and walk_tree_for_removes()
+   - routines are almost identical - just have one if condition different
  - read and write updates to index files directly in file instead of in memory
    - allows for arbitrarily large indexes
    - don't know if this scales well, adding a new entry at the beginning of
@@ -83,7 +114,6 @@ easy - add areas to dprint()
  - avoid errors based on incorrect -r or -s line:
    - have source_dir be empty in receiver config and dest_dir be empty in
 	sender config
- - change name to syncdir-amp (for sync_dir amplifier)
  - show progress of operation
    - assume 1000 files-per-minute indexing, and give time estimate
    - measure file copy time, and give time estimate
@@ -122,15 +152,11 @@ easy - get rid of -vv (it's too much?)
      entry size
 
 == testing ==
- - support running directly from Windows (check that paths all work)
-   that is, not running inside cygwin
-   - go from windows sender to window receiver
-
  - test using different OS for sender and receiver (e.g. Windows to Linux)
-   - am using cygwin to Linux, but not Windows to Linux yet
+   + try windows cygwin to linux
+   + try windows to linux
    - try windows to windows
    - try linux to windows
-   - try windows to linux
    - try windows to android
    - try android to windows
    - try linux to android
@@ -148,6 +174,7 @@ easy - get rid of -vv (it's too much?)
      - after accumulating transfer files, execute sneaksync on receiver
    - make dest_index a source, and send it back in parts by e-mail using
      receiver as sender and vice-versa
+   - throttle the e-mails to avoid getting marked as spam
 
  - have phone be the sync_dir
    - support initiating transfers when phone connects to specific networks
@@ -159,4 +186,5 @@ easy - get rid of -vv (it's too much?)
    - lots of work!, but would save bandwidth on updates
    - sneaksync is mostly about non-changing files (like media), so this is
      low priority
-
+   - can use rsync techniques (but this requires two-way communication)
+     - rsync has sub-programs to create index, delta, etc.
