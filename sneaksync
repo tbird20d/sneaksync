@@ -18,6 +18,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 1.1.1 - change limit checking for remove operations
 # 1.1.0 - handle Windows filename encoding of mbcs (by converting to utf8)
 # 1.0.3 - handle several file system exception conditions
 # 1.0.2 - open index file in binary mode so Windows doesn't add \r on lines
@@ -65,7 +66,7 @@ import re
 # version information
 major_version = 1
 minor_version = 1
-revision = 0 
+revision = 1 
 
 debug = 0
 verbose = 0
@@ -789,6 +790,7 @@ def process_path(cur_path, base_path):
 
 	# ignore items that match any regex pattern in the exclude list
 	for re_pat in config.exclude_re_list:
+		dprint("Checking path '%s' with exclude pattern '%s'\n" % (cur_path, re_pat.pattern))
 		if re_pat.search(cur_path):
 			dprint("Omitting path '%s' due to exclude pattern '%s'\n" % (cur_path, re_pat.pattern))
 			return None
@@ -1200,7 +1202,7 @@ def within_transfer_limit(entry):
 
 ######################## new action system ############################
 def walk_tree_for_updates(entry, other_tree):
-	# look up entry in other tree, if different, do callback
+	# look up entry in other tree, if different make transfer file
 	dprint("walking tree at entry %s" % entry)
 	other = other_tree.lookup_by_path(entry.path)
 	dprint("other= %s" % other)
@@ -1216,14 +1218,17 @@ def walk_tree_for_updates(entry, other_tree):
 			walk_tree_for_updates(child, other_tree)
 
 def walk_tree_for_removes(entry, other_tree):
-	# look up entry in other tree, if different, do callback
+	# look up entry in other tree, if different make transfer file
 	dprint("walking tree at entry %s" % entry)
 	other = other_tree.lookup_by_path(entry.path)
 	dprint("other= %s" % other)
 
 	# if item is not present in other tree, remove it
+	# FIXTHIS - also check for present, but of different type (e.g. entry=dir, but other=file)
 	if other == None:
-		make_transfer_file(entry, "remove")
+		# FIXTHIS - should only check count, not full file size here!
+		if within_transfer_limit(entry):
+			make_transfer_file(entry, "remove")
 
 	if entry.sub_entries:
 		dprint("%s is a dir, walking children" % entry.path)
@@ -1710,7 +1715,7 @@ if __name__ == "__main__":
 #     copy transfer file to dest_dir
 #     update dest_index with entry for newly copied file
 #       get sha1, rewrite dest_index
-#     loop no more files to transfer
+#     loop until no more files to transfer
 # update dest_index
 #   if dest_index is not present, generate it
 #   else scan dest_dir, and update dest_index
