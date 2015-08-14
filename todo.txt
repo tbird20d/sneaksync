@@ -8,13 +8,6 @@ Todo file for dropsync:
  - change README.txt to use github markup
 
 = bugfixes blocking release =
-1 - handle conversion of directory to file or vice-versa
-   - see windows-sender.log for inability to transfer directory "Documents/My Music" because a file with that name is on the target
-   - here is what was in "Documents/My Music": !<symlink>��/cygdrive/c/Users/Family/Music
-   - need to handle windows symlinks?
-   - why isn't file getting deleted?
-   - why isn't directory (symlink?) getting created??? (probably because file exists)
-   - what is transfer file?? (probably empty dir creation)
  - timdesk (receiver) stopped processing files from May 30 to June 12
    - I ran the script manually on June 12, and it worked
    - dropbox wasn't running on windows

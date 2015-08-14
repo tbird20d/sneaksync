@@ -18,6 +18,7 @@
 #  - on sender wakeup, detect source directory change
 #
 # CHANGELOG
+# 1.1.2 - detect changes from file to dir or vice-versa, and handle properly
 # 1.1.1 - change limit checking for remove operations
 # 1.1.0 - handle Windows filename encoding of mbcs (by converting to utf8)
 # 1.0.3 - handle several file system exception conditions
@@ -66,7 +67,7 @@ import re
 # version information
 major_version = 1
 minor_version = 1
-revision = 1 
+revision = 2 
 
 debug = 0
 verbose = 0
@@ -311,7 +312,7 @@ def read_config_file(config_path):
 
 # search for config file, using the following priority:
 #  one specified on command line
-#  one it /etc (system-wide)
+#  one in /etc (system-wide)
 #  one in ~/ (user-specific)
 # if none found, return ""
 def find_config_file(user_specified_config_file):
@@ -541,10 +542,13 @@ class file_entry:
 		dprint("entry.date=%s" % entry.date)
 		dprint("self.perms=%s" % self.perms)
 		dprint("entry.perms=%s" % entry.perms)
+		dprint("self.is_dir=%s" % self.is_dir)
+		dprint("entry.is_dir=%s" % entry.is_dir)
 		if self.sha1 == entry.sha1 and \
 			self.size == entry.size and \
 			self.date == entry.date and \
-			self.perms == entry.perms:
+			self.perms == entry.perms and \
+			self.is_dir == entry.is_dir:
 			dprint("matched!")
 			return self
 		else:
@@ -692,7 +696,7 @@ def parse_index_entry(line, base_path):
 	# sanity-check the input here.  Path must be inside
 	# the intended base directory, or we reject it.
 	# This is to prevent tampered-with transfer files
-	# touching stuff they are not supposed to.
+	# from touching stuff they are not supposed to.
 	test_path = base_path + os.path.sep + path
 	if not os.path.realpath(test_path).startswith(os.path.realpath(base_path)):
 		aprint("ERROR: path '%s' is not inside base path '%s'" % \
@@ -1327,6 +1331,14 @@ def process_transfer_file(filename):
 
 	# Now, let's make something
 	if entry.is_dir:
+		# check for already-existing file with this same name
+		# delete it if present
+		if not os.path.isdir(entry.fs_path()):
+			vprint("Deleting pre-existing file")
+			try:
+				os.remove(entry.fs_path())
+			except:
+				pass
 		# make directory, if not already present
 		vprint("Creating directory")
 		tf.close()
@@ -1335,13 +1347,22 @@ def process_transfer_file(filename):
 		except:
 			pass
 	else:
-		vprint("Copying file contents")
 		# create leading dirs in destination dir if needed
 		try:
 			os.makedirs(os.path.dirname(entry.fs_path()))
 		except:
 			pass
 
+		# check for already-existing directory with this same name
+		# delete it if present
+		if os.path.isdir(entry.fs_path()):
+			vprint("Deleting pre-existing directory")
+			try:
+				os.rmdir(entry.fs_path())
+			except:
+				pass
+
+		vprint("Copying file contents")
 		# if file doesn't exist yet, create it
 		if not os.path.exists(entry.fs_path()):
 			try:
