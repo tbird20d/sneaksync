@@ -5,11 +5,10 @@ Todo file for dropsync:
    - explain all configuration options
    - explain all command-line options
    - give usage examples (one is in README.txt already)
- - change to use #!/usr/bin/env python
  - change README.txt to use github markup
 
 = bugfixes blocking release =
- - handle conversion of directory to file or vice-versa
+1 - handle conversion of directory to file or vice-versa
    - see windows-sender.log for inability to transfer directory "Documents/My Music" because a file with that name is on the target
    - here is what was in "Documents/My Music": !<symlink>��/cygdrive/c/Users/Family/Music
    - need to handle windows symlinks?
@@ -18,6 +17,8 @@ Todo file for dropsync:
    - what is transfer file?? (probably empty dir creation)
  - timdesk (receiver) stopped processing files from May 30 to June 12
    - I ran the script manually on June 12, and it worked
+   - dropbox wasn't running on windows
+   - need to add date and time to index header
  - windows sender didn't avoid sending new files
    - size throttling isn't working
    - I had 3.4G of files in the dropbox folder
@@ -40,10 +41,12 @@ Todo file for dropsync:
 
  - do a different file size limit for deletion (don't check size of file
    content, but only size of transfer file.
-   - have a separate within_transfer_limit() for deletions
+   - have a separate within_transfer_limit() for deletions?
      - pass content size to within_transfer_limit
 
 = other high-priority features =
+ - add date & time to first line of index file
+   - this is to allow manually checking to see if the indexes are stale
  - put amount still outstanding in sender log
    - keep size_skipped, parts_skipped, deletes_skipped stats
 

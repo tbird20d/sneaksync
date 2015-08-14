@@ -29,6 +29,9 @@ else
 fi
 
 if [ "$1" = "-v" ];  then
+	echo "Files remaining:"
 	diff -u ${sync_dir}/source_index ${sync_dir}/dest_index | grep ^-f | cut -d , -f 2,3 ;
+	echo "Parts remaining:"
+	diff -u ${sync_dir}/source_index ${sync_dir}/dest_index | grep ^-p | cut -d , -f 2,3 ;
 fi
 
